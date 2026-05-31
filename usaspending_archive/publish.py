@@ -1,10 +1,11 @@
 """Publish the local partitioned parquet tree to HuggingFace + Cloudflare R2.
 
 R2 is the BI query backend; HF is the public distribution copy + demo source.
-Both receive the same tree. Credentials come from env vars:
+Both receive the same tree. Credentials come from env vars (CF_R2_* matches the
+convention in pull_usaspending / the user's .env files):
 
-    HF_TOKEN, HF_REPO                 (e.g. "some-org/usaspending-bulk")
-    R2_ENDPOINT_URL, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
+    HF_TOKEN, HF_REPO                 (e.g. "some-org/usaspending-bulk-awards")
+    CF_R2_ACCOUNT_ID, CF_R2_ACCESS_KEY_ID, CF_R2_SECRET_ACCESS_KEY, CF_R2_BUCKET
 
 HF upload batches files into commits (HF rate-limits ~128 commits/hr), modeled on
 opm/opm_pipeline/uploader.py. R2 upload reuses the boto3 pattern from
@@ -55,15 +56,16 @@ def r2_client():
     import boto3
     return boto3.client(
         "s3",
-        endpoint_url=os.environ["R2_ENDPOINT_URL"],
-        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        endpoint_url=f"https://{os.environ['CF_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+        aws_access_key_id=os.environ["CF_R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["CF_R2_SECRET_ACCESS_KEY"],
     )
 
 
-def publish_to_r2(files: list[tuple[Path, str]], bucket: str | None = None) -> None:
-    """Upload (local, key) pairs to the R2 bucket."""
-    bucket = bucket or os.environ["R2_BUCKET"]
+def publish_to_r2(files: list[tuple[Path, str]], bucket: str | None = None,
+                  prefix: str = "") -> None:
+    """Upload (local, key) pairs to the R2 bucket, optionally under a key prefix."""
+    bucket = bucket or os.environ["CF_R2_BUCKET"]
     client = r2_client()
     for local, key in files:
-        client.upload_file(str(local), bucket, key)
+        client.upload_file(str(local), bucket, f"{prefix}{key}" if prefix else key)

@@ -106,7 +106,22 @@ Built + validated:
   `references/filter_tree/...`).
 - **Deliverable:** ✅ `reference/*` parquet + dataset card generated (upload deferred to M2 creds).
 
-## Phase 4 — Incremental refresh (GitHub Actions)
+## Phase 4 — Backfill + incremental refresh (GitHub Actions) — built 2026-05-31
+
+**Decided:** HF-only for now (R2 deferred to the website phase). HF dataset =
+**`abigailhaddad/usaspending-bulk-awards`** (token `hf_syX`, created private — flip
+public when backfill completes). HF publish path validated: card + 5 reference tables
+live in the dataset.
+
+Built:
+- `backfill.py` — list → `manifest.changed()` → per file: download → convert → `HfApi.upload_file`
+  at the stable partition key → `manifest.record` → save manifest (after every file → resumable).
+  Stops on first `IP_BLOCKED`, prints `CHAIN_NEEDED`. Filters: `--agency`, `--product`, `--max-files`.
+- `.github/workflows/refresh.yml` — runs backfill (HF_TOKEN secret set), commits the manifest,
+  self-chains via `gh workflow run` (GITHUB_TOKEN, `actions: write`) while files remain;
+  weekly Monday cron. Mirrors OPM's chain pattern.
+- **TODO:** trigger the first chained backfill run; flip dataset public when complete;
+  add R2 mirror call in the website phase.
 
 **Goal:** stay current automatically; never re-process unchanged files.
 

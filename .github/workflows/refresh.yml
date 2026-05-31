@@ -1,0 +1,67 @@
+name: Backfill / refresh HF dataset
+
+# Drains changed archive files into the HF dataset, then self-chains a fresh run
+# (new runner IP) while files remain — the CDN locks an IP after ~15-20 files.
+# The manifest (committed back each run) makes it resumable.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_files:
+        description: "Max files this run (0 = default 200)"
+        required: false
+        default: "0"
+  schedule:
+    - cron: "0 9 * * 1"  # Mondays — source re-publishes ~monthly
+
+permissions:
+  contents: write   # commit the updated manifest
+  actions: write    # self-chain via gh workflow run
+
+concurrency:
+  group: usaspending-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: Backfill
+        id: run
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          MAX="${{ github.event.inputs.max_files }}"
+          ARG=""; [ -n "$MAX" ] && [ "$MAX" != "0" ] && ARG="--max-files $MAX"
+          python -m usaspending_archive.backfill $ARG | tee run.log
+          grep -q CHAIN_NEEDED run.log && echo "chain=true" >> "$GITHUB_OUTPUT" || echo "chain=false" >> "$GITHUB_OUTPUT"
+
+      - name: Commit manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add metadata/manifest.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "manifest unchanged"
+          else
+            git commit -m "Update manifest [skip ci]"
+            git push
+          fi
+
+      - name: Chain next run if files remain
+        if: steps.run.outputs.chain == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run refresh.yml --ref "${{ github.ref_name }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## Backfill run'; echo '```'; cat run.log 2>/dev/null | tail -40; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

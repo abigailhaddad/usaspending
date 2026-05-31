@@ -33,6 +33,21 @@ Full listing paginated 2026-05-30 — **4,629 keys, 91.4 GB compressed, FY2007�
 - CSV → parquet(zstd) on tiny samples only ~2–4× (too small to compress well); on full-size files expect far better. **Budget published parquet at ~90–150 GB.**
 - **Contracts = 297 columns. Assistance = 112 columns.** Different schemas — two separate tables, not one.
 
+## GitHub Actions scale validation (2026-05-31, agencies 097 DoD + 019 State)
+
+Ran `run_one_agency` on GitHub-hosted runners. Real numbers:
+- **CSV → parquet(zstd) ≈ 8× at real file sizes** (State 7.78×, DoD 8.80×) — far better than the
+  tiny-sample 2–4×. So full corpus ≈ **~100 GB parquet** (low end of the budget). Per-file e.g.
+  State FY2024 assistance: 12,969 rows, 17.7 MB CSV → **2.1 MB parquet**.
+- **Conversion is fast** (~3 s per 17 MB file); the *only* bottleneck is the download throttle.
+- **Throttle confirmed on runner IPs too**, and quantified: a single IP gets **~15–20 files**
+  through, then the CDN locks it out for an extended window. Both runs then burned ~60 min
+  because our `download_zip` backoff-*retried* every blocked file (~155 s each) instead of bailing.
+- **Correct strategy (matches prod `pull_usaspending/scan.py` + `scan.yml:99`):** on `IP_BLOCKED`,
+  **stop the run and chain a fresh run** (new runner IP) — do NOT retry through the block.
+  Implication for the backfill: ~15–20 files/run → the full ~4,520 Full files take **many chained
+  runs**; the manifest makes this resumable (each run drains the next slice of unprocessed ETags).
+
 ## Other USAspending data NOT in the archive — available without the Postgres dump
 
 The only non-Postgres mechanism for these is the **Custom Bulk Download API** (async: POST → poll `status_url` → download generated zip). `usaspending_demo/fetch_reap_custom_bulk.py` already implements this pattern.

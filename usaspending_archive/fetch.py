@@ -19,22 +19,23 @@ IP_BLOCKED = "IP_BLOCKED"
 FAILED = "FAILED"
 
 
-def download_zip(url: str, max_retries: int = 5) -> Path | str:
+def download_zip(url: str, max_retries: int = 2) -> Path | str:
     """Stream a zip to a temp file. Returns the temp path or a sentinel string.
 
-    USAspending's CDN throttles rapid sequential requests, surfacing as 5xx or
-    dropped connections. Both are transient, so we back off and retry rather than
-    bailing immediately; IP_BLOCKED is only returned after retries are exhausted.
+    USAspending's CDN locks an IP out for an extended window after ~15–20 requests
+    (validated on GitHub runners, 2026-05-31). Once that happens, retrying is futile
+    — the proven fix is to STOP and let a fresh chained run (new runner IP) continue
+    (see pull_usaspending/scan.py + scan.yml). So we only do a couple of short retries
+    to ride out a genuine transient blip, then return IP_BLOCKED quickly; the caller
+    is responsible for ending the run on IP_BLOCKED rather than grinding through it.
     """
-    last = IP_BLOCKED
     for attempt in range(max_retries):
         try:
             r = requests.get(url, stream=True, timeout=600)
             if r.status_code == 404:
                 return NOT_FOUND
             if r.status_code >= 500:
-                last = IP_BLOCKED
-                time.sleep(min(5 * 2 ** attempt, 120))
+                time.sleep(3 * (attempt + 1))
                 continue
             r.raise_for_status()
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
@@ -44,12 +45,10 @@ def download_zip(url: str, max_retries: int = 5) -> Path | str:
             tmp.close()
             return Path(tmp.name)
         except requests.exceptions.ConnectionError:
-            last = IP_BLOCKED
-            time.sleep(min(5 * 2 ** attempt, 120))
+            time.sleep(3 * (attempt + 1))
         except Exception:
-            last = FAILED
-            time.sleep(min(30 * (attempt + 1), 180))
-    return last
+            return FAILED
+    return IP_BLOCKED
 
 
 def extract_csvs(zip_path: Path, dest: Path) -> list[Path]:

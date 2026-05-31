@@ -47,12 +47,18 @@ def main() -> None:
     tot_csv = tot_pq = tot_rows = 0
     t0 = time.time()
     print(f"\n{'file':52s} {'rows':>10s} {'cols':>5s} {'CSV MB':>8s} {'PQ MB':>7s} {'s':>5s}")
+    blocked = False
     for f in todo:
         ts = time.time()
         time.sleep(1.0)  # be polite to the CDN
         zp = download_zip(f.url)
         if isinstance(zp, str):
             print(f"{f.key:52s}  -> {zp}")
+            if zp == "IP_BLOCKED":
+                # CDN locked this IP out; stop and let a chained run (fresh IP) continue.
+                print("  IP blocked — stopping run (a fresh chained run picks up here)")
+                blocked = True
+                break
             continue
         csvs = extract_csvs(zp, tmp / f.key.replace(".zip", ""))
         csv_bytes = sum(c.stat().st_size for c in csvs)
@@ -72,6 +78,8 @@ def main() -> None:
           f"Parquet={tot_pq/1e6:.1f}MB  ({tot_csv/max(tot_pq,1):.2f}x smaller)  "
           f"in {elapsed:.0f}s")
     print(f"output tree: {DATA}")
+    if blocked:
+        print("CHAIN_NEEDED: run hit IP_BLOCKED before finishing all files")
 
 
 if __name__ == "__main__":

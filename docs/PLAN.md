@@ -66,13 +66,13 @@ Built + validated:
 - **Proof:** contracts 207×297 and assistance 453×112 → typed parquet; a typed aggregation
   over the partition glob (`sum(federal_action_obligation)`) returns a real DOUBLE — the
   demo/BI query path works on the published format.
-- **Note on the CDN throttle:** the bucket throttles bursty local runs (5xx / dropped
-  connections). `download_zip` backs off + retries, but the production fix is the
-  **GitHub Actions chained-run** pattern (Phase 4 / OPM-style) across runner IPs — not a
-  tight local loop. The archive listing is cached to `scratch/archive_index.json` to avoid
-  re-tripping it. **TODO:** still need a real big-agency (e.g. DoD 097) per-file timing/size
-  sample for the full-corpus extrapolation — run it from Actions or with long delays.
-- **Deliverable:** ✅ working pipeline + validated typed/partitioned output.
+- **Scale validated on Actions (097 DoD, 019 State):** CSV→parquet **≈8×** at real sizes →
+  full corpus **~100 GB parquet**; conversion ~3 s/file. The throttle is the only bottleneck:
+  an IP gets **~15–20 files** then is locked out. Corrected strategy (now in code): `download_zip`
+  bails fast on `IP_BLOCKED` (2 short retries only) and the driver **stops the run** on a block
+  so a fresh chained run continues — matches prod `scan.py`/`scan.yml:99`. Listing cached to
+  `scratch/archive_index.json`.
+- **Deliverable:** ✅ working pipeline, validated typed/partitioned output, real scale numbers.
 
 ## Phase 2 — Full backfill → R2 + HF (Contracts + Assistance Full)
 
@@ -106,9 +106,12 @@ Built + validated:
 **Goal:** stay current automatically; never re-process unchanged files.
 
 - `.github/workflows/refresh.yml` — weekly cron (+ manual dispatch). Steps:
-  list archive → `manifest.sync_with_archive()` → for each changed ETag:
-  download→convert→upload→update manifest → commit manifest. Chain runs if backlog
-  remains (OPM's `gh workflow run` self-chain to beat the 6 h cap).
+  list archive → `manifest.changed()` → for each changed ETag:
+  download→convert→upload→update manifest → commit manifest. **Stop on `IP_BLOCKED` and
+  self-chain a fresh run** (`gh workflow run`) — validated: ~15–20 files/IP before lockout,
+  so the first full backfill (~4,520 files) is **many chained runs**, made resumable by the
+  manifest (each run drains the next slice of unprocessed/changed ETags). Pattern proven in
+  prod `scan.yml:99`.
 - Optionally also ingest the **Delta** files for faster incremental row-level updates
   (evaluate vs. just re-pulling changed Full files — Delta adds reconciliation complexity).
 - Refresh reference tables on the same cron.

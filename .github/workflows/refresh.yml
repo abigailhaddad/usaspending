@@ -11,6 +11,14 @@ on:
         description: "Max files this run (0 = default 200)"
         required: false
         default: "0"
+      agency:
+        description: "Limit to one agency code (blank = all). Use for a bounded test."
+        required: false
+        default: ""
+      product:
+        description: "Contracts | Assistance | blank (both)"
+        required: false
+        default: ""
   schedule:
     - cron: "0 9 * * 1"  # Mondays — source re-publishes ~monthly
 
@@ -40,6 +48,8 @@ jobs:
         run: |
           MAX="${{ github.event.inputs.max_files }}"
           ARG=""; [ -n "$MAX" ] && [ "$MAX" != "0" ] && ARG="--max-files $MAX"
+          [ -n "${{ github.event.inputs.agency }}" ] && ARG="$ARG --agency ${{ github.event.inputs.agency }}"
+          [ -n "${{ github.event.inputs.product }}" ] && ARG="$ARG --product ${{ github.event.inputs.product }}"
           python -m usaspending_archive.backfill $ARG | tee run.log
           grep -q CHAIN_NEEDED run.log && echo "chain=true" >> "$GITHUB_OUTPUT" || echo "chain=false" >> "$GITHUB_OUTPUT"
 
@@ -59,7 +69,11 @@ jobs:
         if: steps.run.outputs.chain == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run refresh.yml --ref "${{ github.ref_name }}"
+        run: |
+          gh workflow run refresh.yml --ref "${{ github.ref_name }}" \
+            -f max_files="${{ github.event.inputs.max_files }}" \
+            -f agency="${{ github.event.inputs.agency }}" \
+            -f product="${{ github.event.inputs.product }}"
 
       - name: Summary
         if: always()

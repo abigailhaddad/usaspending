@@ -1,0 +1,56 @@
+name: Scale validation (one agency)
+
+# Runs the fetch -> typed-parquet pipeline for a single agency on a GitHub runner.
+# Runner IPs aren't pre-throttled like a local machine that's been hammering the
+# CDN, so this gives us a real worst-case per-file timing/size sample (default DoD
+# 097) to extrapolate the full-corpus footprint + backfill duration. No secrets:
+# it only downloads + converts, it does not upload anywhere.
+
+on:
+  workflow_dispatch:
+    inputs:
+      agency:
+        description: "Agency code (e.g. 097 = DoD, 069 = State, 389 = small)"
+        required: true
+        default: "097"
+      product:
+        description: "Contracts | Assistance | both"
+        required: true
+        default: "both"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330  # under the 6h cap; big agencies can be slow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run one-agency pipeline
+        run: |
+          ARGS="${{ github.event.inputs.agency }}"
+          if [ "${{ github.event.inputs.product }}" != "both" ]; then
+            ARGS="$ARGS --product ${{ github.event.inputs.product }}"
+          fi
+          python -m usaspending_archive.run_one_agency $ARGS | tee run.log
+      - name: Publish results to job summary
+        if: always()
+        run: |
+          {
+            echo "## Scale validation — agency \`${{ github.event.inputs.agency }}\` (${{ github.event.inputs.product }})"
+            echo '```'
+            cat run.log 2>/dev/null || echo "(no output)"
+            echo '```'
+            echo "### Partition tree"
+            echo '```'
+            find data -name '*.parquet' -printf '%s\t%p\n' 2>/dev/null | sort -k2 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parquet-${{ github.event.inputs.agency }}
+          path: data/
+          if-no-files-found: ignore

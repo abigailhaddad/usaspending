@@ -89,17 +89,22 @@ Built + validated:
 - **Decision needed:** HF org/repo id (OPM uses `impactproject/opm-ehri-data`).
 - **Deliverable:** complete HF dataset + R2 mirror; manifest committed to repo.
 
-## Phase 3 — Reference tables + dataset card (Tier 1)
+## Phase 3 — Reference tables + dataset card (Tier 1) ✅ (2026-05-31)
 
 **Goal:** make the dataset joinable + self-describing. Small, cheap, high leverage.
 
-- `usaspending_archive/reference_data.py` — snapshot to parquet under `reference/`:
-  `data_dictionary`, `toptier_agencies` + `list_agencies`, `assistance_listing` + `cfda/totals`,
-  `naics`, `filter_tree/psc`, `def_codes`, `glossary` (all GET/POST JSON, paginate where needed).
-- Generate the HF **dataset card** (`README.md` on the HF repo) from the data dictionary:
-  column tables per product, provenance, FY coverage, refresh cadence, license (public domain).
-- Feed `schema.py`'s amount/date classification from the data dictionary.
-- **Deliverable:** `reference/*` parquet on HF + R2; HF dataset card.
+- `reference_data.py` — snapshots `data_dictionary` (457), `toptier_agencies` (111),
+  `def_codes` (51), `glossary` (151), `assistance_listing` (56) to `data/reference/*.parquet`.
+  These hit `api.usaspending.gov` (a different host than the throttled archive bucket — no lockout).
+- `dataset_card.py` — generates the HF `README.md` (frontmatter + layout + reference-table
+  counts read live + DuckDB quickstart + provenance/license). Counts stay honest.
+- **Data-dictionary quirk handled + regression-tested:** 17 headers with repeated display
+  names ('Element', 'Award File', … appear twice) + a constant trailing-null 18th column.
+  `dd_columns`/`parse_data_dictionary` de-dupe by raw letter (e.g. `Element (N)`) and drop
+  the null. 7/7 offline tests pass.
+- **TODO (deferred, best-effort):** NAICS + PSC full code→description trees (recursive
+  `references/filter_tree/...`).
+- **Deliverable:** ✅ `reference/*` parquet + dataset card generated (upload deferred to M2 creds).
 
 ## Phase 4 — Incremental refresh (GitHub Actions)
 

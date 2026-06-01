@@ -4,44 +4,51 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>USAspending Table Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="shared/shared.css">
 <style>
-  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; color: #1a1a1a; }
-  header { background: #0b3d63; color: #fff; padding: 16px 24px; }
-  header h1 { margin: 0; font-size: 20px; }
-  header p { margin: 4px 0 0; opacity: .85; font-size: 13px; }
-  .wrap { display: flex; gap: 24px; padding: 24px; align-items: flex-start; flex-wrap: wrap; }
-  .panel { background: #f6f8fa; border: 1px solid #d8dee4; border-radius: 8px; padding: 16px; }
+  .wrap { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .panel { background: var(--color-surface); border: 1px solid var(--color-border);
+    border-radius: var(--card-radius); padding: 16px; box-shadow: var(--shadow-sm); }
   .controls { width: 320px; flex: 0 0 320px; }
   .results { flex: 1 1 480px; min-width: 360px; }
-  label { display: block; font-weight: 600; font-size: 13px; margin: 12px 0 4px; }
-  select, input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #c4ccd4;
-    border-radius: 5px; font: inherit; }
+  label { display: block; font-weight: 600; font-size: 13px; margin: 12px 0 4px; font-family: var(--font-heading); }
+  select, input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--color-border);
+    border-radius: 5px; font: inherit; background: #fff; color: var(--color-text); }
   .row2 { display: flex; gap: 8px; }
   .filter-row { display: flex; gap: 6px; margin-top: 6px; }
-  .filter-row select { flex: 1 1 50%; } .filter-row input { flex: 1 1 50%; }
-  button { background: #0b3d63; color: #fff; border: 0; border-radius: 6px; padding: 9px 14px;
+  .filter-row .ffield { flex: 1 1 45%; } .filter-row .vc { flex: 1 1 55%; }
+  button { background: var(--color-accent); color: #fff; border: 0; border-radius: 6px; padding: 9px 14px;
     font: inherit; font-weight: 600; cursor: pointer; margin-top: 14px; }
-  button.sec { background: #fff; color: #0b3d63; border: 1px solid #0b3d63; margin-top: 0; }
+  button:hover { background: var(--color-accent-hover); }
+  button.sec { background: #fff; color: var(--color-accent); border: 1px solid var(--color-accent); margin-top: 0; }
+  button.sec:hover { background: var(--color-surface); }
   table { border-collapse: collapse; width: 100%; font-size: 14px; }
-  th, td { border-bottom: 1px solid #e1e4e8; padding: 6px 10px; text-align: right; }
+  th, td { border-bottom: 1px solid var(--color-border); padding: 6px 10px; text-align: right; }
+  th { font-family: var(--font-heading); }
   th:first-child, td:first-child { text-align: left; }
-  td.neg { color: #b00; } td.pos { color: #060; }
+  td.neg { color: var(--color-error); } td.pos { color: var(--color-accent); }
   .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;}
-  pre { background: #0d1117; color: #c9d1d9; padding: 12px; border-radius: 6px; overflow-x: auto;
-    font-size: 12px; white-space: pre-wrap; }
-  details { margin-top: 16px; } summary { cursor: pointer; font-weight: 600; }
-  .muted { color: #57606a; font-size: 13px; }
+  pre { background: var(--color-code-bg); color: var(--color-code-text); padding: 12px; border-radius: 6px;
+    overflow-x: auto; font-size: 12px; white-space: pre-wrap; font-family: var(--font-mono); }
+  details { margin-top: 16px; } summary { cursor: pointer; font-weight: 600; font-family: var(--font-heading); }
+  .muted { color: var(--color-text-muted); font-size: 13px; }
+  h3 { font-size: 1.1rem; }
 </style>
 </head>
 <body>
-<header>
+<div class="site-container">
+<header class="site-header">
   <h1>USAspending Table Builder</h1>
-  <p>Aggregate federal contract &amp; assistance spending any way you like — compare two periods,
-     copy a shareable link, and get the exact code to reproduce every result yourself.</p>
-  <nav style="margin-top:8px">
-    <a href="/" style="color:#fff;margin-right:16px;font-weight:600;font-size:13px;text-decoration:underline">Table Builder</a>
-    <a href="/viz.html" style="color:#cfe3f3;margin-right:16px;font-weight:600;font-size:13px;text-decoration:none">Visualizations</a>
-    <a href="/downloads.html" style="color:#cfe3f3;margin-right:16px;font-weight:600;font-size:13px;text-decoration:none">Data Downloads</a>
+  <p class="site-subtitle">Aggregate federal contract &amp; assistance spending any way you like — compare two
+     periods, copy a shareable link, and get the exact code to reproduce every result yourself.</p>
+  <nav class="site-nav" style="margin-top:0.6rem;font-size:0.95rem;">
+    <a href="/" style="font-weight:600;text-decoration:underline">Table Builder</a> &nbsp;·&nbsp;
+    <a href="/viz.html">Visualizations</a> &nbsp;·&nbsp;
+    <a href="/downloads.html">Data Downloads</a>
   </nav>
 </header>
 
@@ -125,7 +132,7 @@ setMulti(rows, "", "funding_subagency"); setMulti(metric, "", "obligations");
 // manageable option list, else a text box (high-cardinality fields like recipient/NAICS).
 function renderValueControl(vc, field, preset){
   vc.innerHTML = "<span class='muted'>loading…</span>";
-  fetch(`/api/filter_options?field=${encodeURIComponent(field)}&dataset=${dataset.value}`)
+  return fetch(`/api/filter_options?field=${encodeURIComponent(field)}&dataset=${dataset.value}`)
     .then(r=>r.json()).then(j=>{
       vc.innerHTML = "";
       if (j.options && j.options.length){
@@ -150,7 +157,7 @@ function addFilterRow(field="", valuesPipe=""){
   const vc = document.createElement("span"); vc.className = "vc";
   s.onchange = () => renderValueControl(vc, s.value, []);
   div.append(s, vc); filters.append(div);
-  renderValueControl(vc, s.value, valuesPipe ? valuesPipe.split("|") : []);
+  return renderValueControl(vc, s.value, valuesPipe ? valuesPipe.split("|") : []);
 }
 addFilter.onclick = () => addFilterRow();
 compare.onchange = () => bwrap.style.display = compare.checked ? "" : "none";
@@ -181,24 +188,25 @@ function loadFromURL(){
   setMulti(metric, p.get("metric"), "obligations");
   const pa = p.get("periodA"); if (pa){ [a_start.value, a_end.value] = pa.split(".."); }
   const pb = p.get("periodB"); if (pb){ compare.checked = true; bwrap.style.display=""; [b_start.value, b_end.value] = pb.split(".."); }
-  let any=false;
-  for (const [k,v] of p) if (k.startsWith("filter_")){ addFilterRow(k.slice(7), v); any=true; }
+  let any=false; const proms=[];
+  for (const [k,v] of p) if (k.startsWith("filter_")){ proms.push(addFilterRow(k.slice(7), v)); any=true; }
   if (!any) addFilterRow();
-  run();
+  Promise.all(proms).then(run);  // wait for filter dropdowns to load+preselect before the first query
 }
 
+const msg = document.getElementById("status");
 async function run(){
   const p = buildParams();
   history.replaceState(null, "", "?" + p.toString());
-  status.textContent = "Running…";
+  msg.textContent = "Running…";
   try {
     const res = await fetch("/api/table?" + p.toString());
     const j = await res.json();
-    if (j.error){ status.textContent = "Error: " + j.error; return; }
+    if (j.error){ msg.textContent = "Error: " + j.error; return; }
     renderTables(j);
     if (j.tables.length){ lastRepro = j.tables[0].reproduce; showCode(curLang); codeBox.style.display = ""; }
-    status.textContent = `${j.tables.length} table(s)`;
-  } catch(e){ status.textContent = "Error: " + e.message; }
+    msg.textContent = `${j.tables.length} table(s)`;
+  } catch(e){ msg.textContent = "Error: " + e.message; }
 }
 
 function fmt(v, col){
@@ -250,8 +258,8 @@ function showCode(l){
   code.textContent = lastRepro ? lastRepro[l] : "";
   document.querySelectorAll(".lang").forEach(b => {
     const on = b.dataset.l === l;
-    b.style.background = on ? "#0b3d63" : "#fff";
-    b.style.color = on ? "#fff" : "#0b3d63";
+    b.style.background = on ? "#2D6A4F" : "#fff";
+    b.style.color = on ? "#fff" : "#2D6A4F";
   });
   openColab.style.display = (l === "python") ? "" : "none";  // Colab is Python-only
 }
@@ -264,30 +272,31 @@ download.onclick = () => {
 };
 openColab.onclick = async () => {
   if (!lastRepro) return;
-  status.textContent = "Creating Colab notebook…";
+  msg.textContent = "Creating Colab notebook…";
   try {
     const res = await fetch("/api/colab", {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({code: lastRepro.python})});
     const j = await res.json();
-    if (j.colab_url) { window.open(j.colab_url, "_blank"); status.textContent = "Opened in Colab"; }
-    else status.textContent = "Colab error: " + (j.error || "?");
-  } catch(e){ status.textContent = "Colab error: " + e.message; }
+    if (j.colab_url) { window.open(j.colab_url, "_blank"); msg.textContent = "Opened in Colab"; }
+    else msg.textContent = "Colab error: " + (j.error || "?");
+  } catch(e){ msg.textContent = "Colab error: " + e.message; }
 };
 
-copyLink.onclick = () => { navigator.clipboard.writeText(location.href); status.textContent = "Link copied"; };
+copyLink.onclick = () => { navigator.clipboard.writeText(location.href); msg.textContent = "Link copied"; };
 // disaggregated: the record-level rows behind the current filters/period
 records.onclick = async () => {
-  status.textContent = "Fetching matching records…";
+  msg.textContent = "Fetching matching records…";
   try {
     const res = await fetch("/api/detail?" + buildParams().toString());
     const j = await res.json();
-    if (j.error){ status.textContent = "Error: " + j.error; return; }
+    if (j.error){ msg.textContent = "Error: " + j.error; return; }
     downloadCSV(j.columns, j.data, "records.csv");
-    status.textContent = `${j.count} records${j.truncated ? " (capped at 100k)" : ""}`;
-  } catch(e){ status.textContent = "Error: " + e.message; }
+    msg.textContent = `${j.count} records${j.truncated ? " (capped at 100k)" : ""}`;
+  } catch(e){ msg.textContent = "Error: " + e.message; }
 };
 go.onclick = run;
 loadFromURL();
 </script>
+</div>
 </body>
 </html>

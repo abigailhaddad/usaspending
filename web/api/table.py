@@ -10,10 +10,20 @@ Params: dataset, rows=dim1,dim2 (comma), metric=m1,m2 (comma),
         periodA=YYYY-MM-DD..YYYY-MM-DD, periodB=..., filter_<dim>=a|b, filter_<dim>_min/_max
 """
 import json
+import math
 import os
 import sys
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+
+
+def _clean(v):
+    """JSON-safe: NaN/NaT -> None, numpy scalars -> native Python (JSON has no NaN)."""
+    if hasattr(v, "item"):
+        v = v.item()
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    return v
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dims import DIMENSIONS, METRICS, parse_filters
@@ -58,11 +68,11 @@ def build_response(params):
             columns += [f"{lab} — A", f"{lab} — B", f"{lab} — Δ", f"{lab} — Δ%"] if two else [lab]
         data = []
         for _, r in df.iterrows():
-            row = [r["row"]]
+            row = [_clean(r["row"])]
             for m in mets:
-                a = r.get(f"{m}__a")
+                a = _clean(r.get(f"{m}__a"))
                 if two:
-                    b = r.get(f"{m}__b")
+                    b = _clean(r.get(f"{m}__b"))
                     d = (b - a) if (a is not None and b is not None) else None
                     pct = round(d / a * 100, 1) if (d is not None and a) else None
                     row += [a, b, d, pct]
@@ -87,6 +97,7 @@ def detail_response(params, limit=100000):
     con = get_conn()
     rows = con.execute(sql.format(src=source_expr(dataset)), qbinds).fetchall()
     con.close()
+    rows = [[_clean(v) for v in r] for r in rows]
     return {"columns": cols, "data": rows, "count": len(rows),
             "truncated": len(rows) >= limit, "reproduce": query.reproduce_detail(req)}
 

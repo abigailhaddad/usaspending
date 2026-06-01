@@ -20,7 +20,7 @@ import { fmtCell } from "@/lib/format";
 
 type Repro = { python: string; sql: string };
 type TableResult = {
-  label: string; dimension: string; columns: string[];
+  label: string; dimension: string; group_cols: number; columns: string[];
   data: (string | number | null)[][]; reproduce: Repro;
 };
 type Filter = {
@@ -200,7 +200,7 @@ export default function TableBuilder() {
         </div>
       </Step>
 
-      <Step n={3} title="Select table elements" hint="Each “group by” makes its own table. Pick one or more measures to aggregate.">
+      <Step n={3} title="Select table elements" hint="Group by one or more fields — they combine into a single table (GROUP BY a, b, …). Pick measures to aggregate.">
         <div className="space-y-4">
           <div>
             <Label className="mb-1.5 block">Group by</Label>
@@ -269,13 +269,13 @@ export default function TableBuilder() {
             <div className="max-h-[460px] overflow-auto rounded-md border">
               <Table>
                 <TableHeader className="sticky top-0 bg-muted">
-                  <TableRow>{t.columns.map((c, i) => <TableHead key={i} className={i === 0 ? "" : "text-right"}>{c}</TableHead>)}</TableRow>
+                  <TableRow>{t.columns.map((c, i) => <TableHead key={i} className={i < t.group_cols ? "" : "text-right"}>{c}</TableHead>)}</TableRow>
                 </TableHeader>
                 <TableBody>
                   {t.data.map((r, ri) => (
                     <TableRow key={ri}>
                       {r.map((v, ci) => (
-                        <TableCell key={ci} className={`${ci === 0 ? "font-medium" : "text-right tabular-nums"} ${cellClass(t.columns[ci], v)}`}>{fmtCell(v, t.columns[ci])}</TableCell>
+                        <TableCell key={ci} className={`${ci < t.group_cols ? "font-medium" : "text-right tabular-nums"} ${cellClass(t.columns[ci], v)}`}>{fmtCell(v, t.columns[ci])}</TableCell>
                       ))}
                     </TableRow>
                   ))}

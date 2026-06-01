@@ -35,22 +35,32 @@ def _mask(period):
     return f"{DATE_COL} BETWEEN '{s}' AND '{e}'"
 
 
+def _group_cols(req):
+    """Resolve the group-by dimension(s) to SQL column expressions. `rows` may be a single
+    dim or a list — a real GROUP BY over all of them."""
+    rows = req["rows"]
+    rows = rows if isinstance(rows, (list, tuple)) else [rows]
+    cols = [resolve_col(r) for r in rows]
+    if not cols or any(c is None for c in cols):
+        raise ValueError("bad group-by dimension")
+    return cols
+
+
 def build_sql(req):
-    """req: {dataset, rows, metric, periodA?, periodB?, filter_clauses, filter_binds}.
+    """One metric grouped by one or more columns. Group cols are selected as g0..gN.
     Returns (sql_template_with_{src}, binds)."""
     if req["dataset"] not in DATASETS:
         raise ValueError("bad dataset")
     if req["metric"] not in METRICS:
         raise ValueError("bad metric")
-    rcol = resolve_col(req["rows"])  # curated dim, alias, or any valid column
-    if not rcol:
-        raise ValueError("bad row dimension")
+    gcols = _group_cols(req)
+    gsel = ", ".join(f"{c} AS g{i}" for i, c in enumerate(gcols))   # SELECT … AS g0, g1…
+    gby = ", ".join(gcols)                                          # GROUP BY <exprs>
+    gids = ", ".join(f"g{i}" for i in range(len(gcols)))           # outer alias list
     where = req.get("filter_clauses", [])
     binds = list(req.get("filter_binds", []))
     pa, pb = req.get("periodA"), req.get("periodB")
     mask_a, mask_b = _mask(pa), _mask(pb) if pb else None
-
-    # restrict the scan to the relevant period(s)
     if pa and pb:
         where = where + [f"({mask_a} OR {mask_b})"]
     elif pa:
@@ -64,42 +74,42 @@ def build_sql(req):
         if b_net:
             cols.append("count(*) FILTER (WHERE net_b IS NOT NULL AND net_b != 0) AS b")
         inner_cols = [f"{a_net} AS net_a"] + ([f"{b_net} AS net_b"] if b_net else [])
-        sql = (f"SELECT row, {', '.join(cols)} FROM ("
-               f"  SELECT {rcol} AS row, {UEI} AS uei, {', '.join(inner_cols)} "
+        sql = (f"SELECT {gids}, {', '.join(cols)} FROM ("
+               f"  SELECT {gsel}, {UEI} AS uei, {', '.join(inner_cols)} "
                f"  FROM {{src}} {where_sql} {'AND' if where_sql else 'WHERE'} {UEI} IS NOT NULL "
-               f"  GROUP BY 1, 2"
-               f") GROUP BY 1 ORDER BY a DESC NULLS LAST")
+               f"  GROUP BY {gby}, {UEI}"
+               f") GROUP BY {gids} ORDER BY a DESC NULLS LAST")
     else:
         tmpl = METRICS[req["metric"]]["sql"]
         cols = [tmpl.format(p=mask_a) + " AS a"]
         if mask_b:
             cols.append(tmpl.format(p=mask_b) + " AS b")
-        sql = (f"SELECT {rcol} AS row, {', '.join(cols)} "
-               f"FROM {{src}} {where_sql} GROUP BY 1 ORDER BY a DESC NULLS LAST")
+        sql = (f"SELECT {gsel}, {', '.join(cols)} "
+               f"FROM {{src}} {where_sql} GROUP BY {gby} ORDER BY a DESC NULLS LAST")
     return sql, binds
 
 
 def build_multi_sql(req):
-    """One table for a dimension with several metrics at once (FULL JOIN per metric).
-
-    req: {..., rows, metrics:[...], periodA?, periodB?}. Returns (sql_template, binds, metrics, two).
-    """
+    """One table grouped by the dimension(s) in `rows`, with one or more metrics.
+    Returns (sql_template, binds, metrics, two). Output columns: g0..gN then per-metric a/b."""
     metrics = req.get("metrics") or [req.get("metric", "obligations")]
     two = bool(req.get("periodB"))
+    ng = len(_group_cols(req))  # number of group-by columns
     subs, binds = [], []
     for i, m in enumerate(metrics):
         s, b = build_sql({**req, "metric": m})
         subs.append((f"t{i}", s))
         binds += b
-    rowkey = "COALESCE(" + ", ".join(f"{a}.row" for a, _ in subs) + ") AS row"
-    cols = [rowkey]
+    # coalesce each group column across the per-metric subqueries
+    cols = [f"COALESCE({', '.join(a + f'.g{k}' for a, _ in subs)}) AS g{k}" for k in range(ng)]
     for (a, _), m in zip(subs, metrics):
         cols.append(f'{a}.a AS "{m}__a"')
         if two:
             cols.append(f'{a}.b AS "{m}__b"')
     sql = f"SELECT {', '.join(cols)} FROM ({subs[0][1]}) t0"
     for i in range(1, len(subs)):
-        sql += f" FULL JOIN ({subs[i][1]}) t{i} ON t0.row IS NOT DISTINCT FROM t{i}.row"
+        on = " AND ".join(f"t0.g{k} IS NOT DISTINCT FROM t{i}.g{k}" for k in range(ng))
+        sql += f" FULL JOIN ({subs[i][1]}) t{i} ON {on}"
     sql += f' ORDER BY "{metrics[0]}__a" DESC NULLS LAST'
     if req.get("limit"):
         sql += f" LIMIT {int(req['limit'])}"

@@ -51,39 +51,41 @@ def build_response(params):
                 filter_clauses=clauses, filter_binds=binds,
                 limit=int(top) if top and top.isdigit() else None)
 
+    # ONE table grouped by ALL chosen dimensions (a real GROUP BY g0, g1, …)
+    group_dims = [d for d in dims if resolve_col(d)]
+    if not group_dims:
+        group_dims = ["funding_subagency"]
+    label = lambda d: DIMENSIONS[d]["label"] if d in DIMENSIONS else d.replace("_", " ")
+
     con = get_conn()
     src = source_expr(dataset)
     two = pb is not None
-    tables = []
-    for dim in dims:
-        if not resolve_col(dim):  # curated dim, alias, or any valid column
-            continue
-        dim_label = DIMENSIONS[dim]["label"] if dim in DIMENSIONS else dim.replace("_", " ")
-        req = dict(base, rows=dim)
-        sql, qbinds, mets, _ = query.build_multi_sql(req)
-        df = con.execute(sql.format(src=src), qbinds).df()
-
-        columns = [dim_label]
-        for m in mets:
-            lab = METRICS[m]["label"]
-            columns += [f"{lab} — A", f"{lab} — B", f"{lab} — Δ", f"{lab} — Δ%"] if two else [lab]
-        data = []
-        for _, r in df.iterrows():
-            row = [_clean(r["row"])]
-            for m in mets:
-                a = _clean(r.get(f"{m}__a"))
-                if two:
-                    b = _clean(r.get(f"{m}__b"))
-                    d = (b - a) if (a is not None and b is not None) else None
-                    pct = round(d / a * 100, 1) if (d is not None and a) else None
-                    row += [a, b, d, pct]
-                else:
-                    row += [a]
-            data.append(row)
-        tables.append({"dimension": dim, "label": dim_label,
-                       "columns": columns, "data": data, "reproduce": query.reproduce_multi(req)})
+    req = dict(base, rows=group_dims)
+    sql, qbinds, mets, _ = query.build_multi_sql(req)
+    df = con.execute(sql.format(src=src), qbinds).df()
     con.close()
-    return {"meta": {"dataset": dataset, "dims": dims, "metrics": metrics,
+
+    columns = [label(d) for d in group_dims]
+    for m in mets:
+        lab = METRICS[m]["label"]
+        columns += [f"{lab} — A", f"{lab} — B", f"{lab} — Δ", f"{lab} — Δ%"] if two else [lab]
+    data = []
+    for _, r in df.iterrows():
+        row = [_clean(r.get(f"g{i}")) for i in range(len(group_dims))]
+        for m in mets:
+            a = _clean(r.get(f"{m}__a"))
+            if two:
+                b = _clean(r.get(f"{m}__b"))
+                d = (b - a) if (a is not None and b is not None) else None
+                pct = round(d / a * 100, 1) if (d is not None and a) else None
+                row += [a, b, d, pct]
+            else:
+                row += [a]
+        data.append(row)
+    tables = [{"dimension": ",".join(group_dims), "label": " × ".join(label(d) for d in group_dims),
+               "group_cols": len(group_dims), "columns": columns, "data": data,
+               "reproduce": query.reproduce_multi(req)}]
+    return {"meta": {"dataset": dataset, "dims": group_dims, "metrics": metrics,
                      "periodA": pa, "periodB": pb, "tables": len(tables)},
             "tables": tables}
 

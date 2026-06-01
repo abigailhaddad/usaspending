@@ -1,11 +1,13 @@
-"""/api/table — the table-builder endpoint.
+"""/api/table and /api/detail — the table-builder endpoints.
 
-GET params:
-  dataset=contracts|assistance   rows=<dim>   metric=<metric>
-  periodA=YYYY-MM-DD..YYYY-MM-DD  [periodB=...]   filter_<dim>=a|b  filter_<dim>_min/_max
+/api/table  : one or more breakdowns at once, each with one or more metrics, optional
+              two-period (A/B) comparison. Returns { tables:[...], meta } where each table
+              carries its own reproduce code.
+/api/detail : the disaggregated record-level rows behind the current filters/period
+              (the download), with reproduce code.
 
-Returns { meta, columns, data, reproduce:{sql, python} } — including the exact runnable
-code against the PUBLIC dataset so the result is independently verifiable.
+Params: dataset, rows=dim1,dim2 (comma), metric=m1,m2 (comma),
+        periodA=YYYY-MM-DD..YYYY-MM-DD, periodB=..., filter_<dim>=a|b, filter_<dim>_min/_max
 """
 import json
 import os
@@ -21,68 +23,84 @@ from data_loader import get_conn, source_expr
 
 def _period(params, name):
     raw = params.get(name, [""])[0]
-    if ".." in raw:
-        s, e = raw.split("..", 1)
-        return (s, e)
-    return None
+    return tuple(raw.split("..", 1)) if ".." in raw else None
+
+
+def _csv(params, name, default):
+    return [x for x in params.get(name, [default])[0].split(",") if x] or [default]
 
 
 def build_response(params):
     dataset = params.get("dataset", ["contracts"])[0]
-    rows = params.get("rows", ["funding_subagency"])[0]
-    metric = params.get("metric", ["obligations"])[0]
+    dims = _csv(params, "rows", "funding_subagency")
+    metrics = _csv(params, "metric", "obligations")
     pa, pb = _period(params, "periodA"), _period(params, "periodB")
     clauses, binds = parse_filters(params)
-
-    req = dict(dataset=dataset, rows=rows, metric=metric, periodA=pa, periodB=pb,
-               filter_clauses=clauses, filter_binds=binds)
-    sql, qbinds = query.build_sql(req)
+    top = params.get("top", [None])[0]
+    base = dict(dataset=dataset, metrics=metrics, periodA=pa, periodB=pb,
+                filter_clauses=clauses, filter_binds=binds,
+                limit=int(top) if top and top.isdigit() else None)
 
     con = get_conn()
-    df = con.execute(sql.format(src=source_expr(dataset)), qbinds).df()
-    con.close()
-
+    src = source_expr(dataset)
     two = pb is not None
-    if two and len(df):
-        df["delta"] = df["b"] - df["a"]
-        df["pct"] = (df["delta"] / df["a"].replace(0, None)) * 100
+    tables = []
+    for dim in dims:
+        if dim not in DIMENSIONS:
+            continue
+        req = dict(base, rows=dim)
+        sql, qbinds, mets, _ = query.build_multi_sql(req)
+        df = con.execute(sql.format(src=src), qbinds).df()
 
-    columns = [DIMENSIONS[rows]["label"], METRICS[metric]["label"] + (" — A" if two else "")]
-    if two:
-        columns += [METRICS[metric]["label"] + " — B", "Change", "% change"]
-    data = []
-    for _, r in df.iterrows():
-        row = [r["row"], r["a"]]
-        if two:
-            row += [r["b"], r["delta"], round(r["pct"], 1) if r["pct"] == r["pct"] else None]
-        data.append(row)
+        columns = [DIMENSIONS[dim]["label"]]
+        for m in mets:
+            lab = METRICS[m]["label"]
+            columns += [f"{lab} — A", f"{lab} — B", f"{lab} — Δ", f"{lab} — Δ%"] if two else [lab]
+        data = []
+        for _, r in df.iterrows():
+            row = [r["row"]]
+            for m in mets:
+                a = r.get(f"{m}__a")
+                if two:
+                    b = r.get(f"{m}__b")
+                    d = (b - a) if (a is not None and b is not None) else None
+                    pct = round(d / a * 100, 1) if (d is not None and a) else None
+                    row += [a, b, d, pct]
+                else:
+                    row += [a]
+            data.append(row)
+        tables.append({"dimension": dim, "label": DIMENSIONS[dim]["label"],
+                       "columns": columns, "data": data, "reproduce": query.reproduce_multi(req)})
+    con.close()
+    return {"meta": {"dataset": dataset, "dims": dims, "metrics": metrics,
+                     "periodA": pa, "periodB": pb, "tables": len(tables)},
+            "tables": tables}
 
-    return {
-        "meta": {"dataset": dataset, "rows": rows, "metric": metric,
-                 "periodA": pa, "periodB": pb, "count": len(data)},
-        "columns": columns,
-        "data": data,
-        "reproduce": query.reproduce(req),
-    }
+
+def detail_response(params, limit=100000):
+    dataset = params.get("dataset", ["contracts"])[0]
+    pa, pb = _period(params, "periodA"), _period(params, "periodB")
+    clauses, binds = parse_filters(params)
+    req = dict(dataset=dataset, periodA=pa, periodB=pb,
+               filter_clauses=clauses, filter_binds=binds)
+    sql, qbinds, cols = query.build_detail_sql(req, limit)
+    con = get_conn()
+    rows = con.execute(sql.format(src=source_expr(dataset)), qbinds).fetchall()
+    con.close()
+    return {"columns": cols, "data": rows, "count": len(rows),
+            "truncated": len(rows) >= limit, "reproduce": query.reproduce_detail(req)}
 
 
 class handler(BaseHTTPRequestHandler):
-    def _send(self, code, body):
+    def do_GET(self):
+        try:
+            params = parse_qs(urlparse(self.path).query)
+            body = build_response(params)
+            code = 200
+        except Exception as e:
+            body, code = {"error": str(e)}, 400
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps(body, default=str).encode())
-
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.end_headers()
-
-    def do_GET(self):
-        try:
-            params = parse_qs(urlparse(self.path).query)
-            self._send(200, build_response(params))
-        except Exception as e:
-            self._send(400, {"error": str(e)})

@@ -75,6 +75,48 @@ def build_sql(req):
     return sql, binds
 
 
+def build_multi_sql(req):
+    """One table for a dimension with several metrics at once (FULL JOIN per metric).
+
+    req: {..., rows, metrics:[...], periodA?, periodB?}. Returns (sql_template, binds, metrics, two).
+    """
+    metrics = req.get("metrics") or [req.get("metric", "obligations")]
+    two = bool(req.get("periodB"))
+    subs, binds = [], []
+    for i, m in enumerate(metrics):
+        s, b = build_sql({**req, "metric": m})
+        subs.append((f"t{i}", s))
+        binds += b
+    rowkey = "COALESCE(" + ", ".join(f"{a}.row" for a, _ in subs) + ") AS row"
+    cols = [rowkey]
+    for (a, _), m in zip(subs, metrics):
+        cols.append(f'{a}.a AS "{m}__a"')
+        if two:
+            cols.append(f'{a}.b AS "{m}__b"')
+    sql = f"SELECT {', '.join(cols)} FROM ({subs[0][1]}) t0"
+    for i in range(1, len(subs)):
+        sql += f" FULL JOIN ({subs[i][1]}) t{i} ON t0.row IS NOT DISTINCT FROM t{i}.row"
+    sql += f' ORDER BY "{metrics[0]}__a" DESC NULLS LAST'
+    if req.get("limit"):
+        sql += f" LIMIT {int(req['limit'])}"
+    return sql, binds, metrics, two
+
+
+def build_detail_sql(req, limit=100000):
+    """Record-level rows behind the current filters/period (the disaggregated data)."""
+    from dims import DETAIL_COLUMNS
+    cols = DETAIL_COLUMNS.get(req["dataset"], DETAIL_COLUMNS["contracts"])
+    where = list(req.get("filter_clauses", []))
+    binds = list(req.get("filter_binds", []))
+    masks = [_mask(p) for p in (req.get("periodA"), req.get("periodB")) if p]
+    if masks:
+        where.append("(" + " OR ".join(masks) + ")")
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    sel = ", ".join(cols)
+    return (f"SELECT {sel} FROM {{src}} {where_sql} "
+            f"ORDER BY {OBL} DESC NULLS LAST LIMIT {limit}"), binds, cols
+
+
 def _inline(sql, binds):
     """Replace ? placeholders with safely-quoted literals (for the copy-paste snippet)."""
     out = sql
@@ -118,3 +160,31 @@ def reproduce(req):
         f'print(dbGetQuery(con, r"(\n{q}\n)"))\n'
     )
     return {"sql": sql_script, "python": python, "r": r}
+
+
+def _render_code(sql_hf):
+    q = (sql_hf.replace(" FROM ", "\n  FROM ").replace(" WHERE ", "\n  WHERE ")
+               .replace(" GROUP BY ", "\n  GROUP BY ").replace(" FULL JOIN ", "\n  FULL JOIN "))
+    header = "Reproduce this exact result from the public USAspending dataset on HuggingFace."
+    return {
+        "sql": f"-- {header}\n-- DuckDB {DUCKDB_VERSION}\nINSTALL httpfs; LOAD httpfs;\n{q};\n",
+        "python": (f"# {header}\n# pip install duckdb=={DUCKDB_VERSION}\nimport duckdb\n"
+                   "con = duckdb.connect()\ncon.execute(\"INSTALL httpfs; LOAD httpfs;\")\n"
+                   f'con.sql(r"""\n{q}\n""").show()\n'),
+        "r": (f"# {header}\n# install.packages(\"duckdb\")  # version {DUCKDB_VERSION}\n"
+              "library(duckdb)\ncon <- dbConnect(duckdb())\n"
+              'dbExecute(con, "INSTALL httpfs; LOAD httpfs;")\n'
+              f'print(dbGetQuery(con, r"(\n{q}\n)"))\n'),
+    }
+
+
+def reproduce_multi(req):
+    """Reproduce code for a multi-metric table (one combined query)."""
+    sql, binds, _, _ = build_multi_sql(req)
+    return _render_code(_inline(sql.format(src=hf_source(req["dataset"])), binds))
+
+
+def reproduce_detail(req):
+    """Reproduce code for the disaggregated record-level download."""
+    sql, binds, _ = build_detail_sql(req)
+    return _render_code(_inline(sql.format(src=hf_source(req["dataset"])), binds))

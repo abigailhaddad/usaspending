@@ -38,6 +38,11 @@
   <h1>USAspending Table Builder</h1>
   <p>Aggregate federal contract &amp; assistance spending any way you like — compare two periods,
      copy a shareable link, and get the exact code to reproduce every result yourself.</p>
+  <nav style="margin-top:8px">
+    <a href="/" style="color:#fff;margin-right:16px;font-weight:600;font-size:13px;text-decoration:underline">Table Builder</a>
+    <a href="/viz.html" style="color:#cfe3f3;margin-right:16px;font-weight:600;font-size:13px;text-decoration:none">Visualizations</a>
+    <a href="/downloads.html" style="color:#cfe3f3;margin-right:16px;font-weight:600;font-size:13px;text-decoration:none">Data Downloads</a>
+  </nav>
 </header>
 
 <div class="wrap">
@@ -48,11 +53,11 @@
       <option value="assistance">Assistance (grants/loans)</option>
     </select>
 
-    <label>Break down by (rows)</label>
-    <select id="rows"></select>
+    <label>Break down by <span class="muted">(one table each — ⌘/Ctrl-click for several)</span></label>
+    <select id="rows" multiple size="6"></select>
 
-    <label>Measure</label>
-    <select id="metric"></select>
+    <label>Measure <span class="muted">(⌘/Ctrl-click for several)</span></label>
+    <select id="metric" multiple size="4"></select>
 
     <label><input type="checkbox" id="compare" style="width:auto"> Compare two periods</label>
 
@@ -73,10 +78,10 @@
   <div class="results panel">
     <div class="bar">
       <button class="sec" id="copyLink" type="button">Copy link</button>
-      <button class="sec" id="csv" type="button">Download CSV</button>
+      <button class="sec" id="records" type="button">Download matching records (CSV)</button>
       <span class="muted" id="status"></span>
     </div>
-    <div id="table"></div>
+    <div id="tables"></div>
     <details id="codeBox" style="display:none">
       <summary>Show the code to reproduce this result</summary>
       <p class="muted">Runs against the public dataset on HuggingFace — anyone can verify this number.</p>
@@ -113,7 +118,8 @@ const FILTER_FIELDS = {...DIMENSIONS,
 
 function opt(sel, map){ for (const k in map) sel.add(new Option(map[k], k)); }
 opt(rows, DIMENSIONS); opt(metric, METRICS);
-rows.value = "funding_subagency";
+function setMulti(sel, csv, def){ const want=(csv||def).split(","); [...sel.options].forEach(o=>o.selected=want.includes(o.value)); }
+setMulti(rows, "", "funding_subagency"); setMulti(metric, "", "obligations");
 
 // Build the value control for a filter field: a labelled multi-select when the field has a
 // manageable option list, else a text box (high-cardinality fields like recipient/NAICS).
@@ -151,7 +157,9 @@ compare.onchange = () => bwrap.style.display = compare.checked ? "" : "none";
 
 function buildParams(){
   const p = new URLSearchParams();
-  p.set("dataset", dataset.value); p.set("rows", rows.value); p.set("metric", metric.value);
+  p.set("dataset", dataset.value);
+  const rdims = [...rows.selectedOptions].map(o=>o.value); if (rdims.length) p.set("rows", rdims.join(","));
+  const mets = [...metric.selectedOptions].map(o=>o.value); if (mets.length) p.set("metric", mets.join(","));
   if (a_start.value && a_end.value) p.set("periodA", `${a_start.value}..${a_end.value}`);
   if (compare.checked && b_start.value && b_end.value) p.set("periodB", `${b_start.value}..${b_end.value}`);
   document.querySelectorAll(".filter-row").forEach(r => {
@@ -168,8 +176,9 @@ function buildParams(){
 function loadFromURL(){
   const p = new URLSearchParams(location.search);
   if (![...p.keys()].length) { addFilterRow(); return; }
-  dataset.value = p.get("dataset")||"contracts"; rows.value = p.get("rows")||"funding_subagency";
-  metric.value = p.get("metric")||"obligations";
+  dataset.value = p.get("dataset")||"contracts";
+  setMulti(rows, p.get("rows"), "funding_subagency");
+  setMulti(metric, p.get("metric"), "obligations");
   const pa = p.get("periodA"); if (pa){ [a_start.value, a_end.value] = pa.split(".."); }
   const pb = p.get("periodB"); if (pb){ compare.checked = true; bwrap.style.display=""; [b_start.value, b_end.value] = pb.split(".."); }
   let any=false;
@@ -178,7 +187,6 @@ function loadFromURL(){
   run();
 }
 
-let lastData = null, lastCols = null;
 async function run(){
   const p = buildParams();
   history.replaceState(null, "", "?" + p.toString());
@@ -187,31 +195,51 @@ async function run(){
     const res = await fetch("/api/table?" + p.toString());
     const j = await res.json();
     if (j.error){ status.textContent = "Error: " + j.error; return; }
-    lastData = j.data; lastCols = j.columns;
-    renderTable(j); lastRepro = j.reproduce; showCode(curLang);
-    codeBox.style.display = ""; status.textContent = `${j.meta.count} rows`;
+    renderTables(j);
+    if (j.tables.length){ lastRepro = j.tables[0].reproduce; showCode(curLang); codeBox.style.display = ""; }
+    status.textContent = `${j.tables.length} table(s)`;
   } catch(e){ status.textContent = "Error: " + e.message; }
 }
 
 function fmt(v, col){
   if (v == null) return "";
+  if (col.endsWith("Δ%")) return (typeof v === "number") ? ((v>0?"+":"") + v + "%") : v;
   if (typeof v === "number"){
-    if (/\$|Obligations|Change/.test(col)) return "$" + (v/1e6).toLocaleString(undefined,{maximumFractionDigits:1}) + "M";
+    if (col.includes("($)")) return (v<0?"-$":"$") + Math.abs(v/1e6).toLocaleString(undefined,{maximumFractionDigits:1}) + "M";
     return v.toLocaleString();
   }
   return v;
 }
-function renderTable(j){
-  let h = "<table><thead><tr>" + j.columns.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
-  for (const row of j.data){
+function renderOne(t){
+  let h = "<table><thead><tr>" + t.columns.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
+  for (const row of t.data){
     h += "<tr>" + row.map((v,i)=>{
-      const c = j.columns[i]; let cls = "";
-      if (c === "% change" && typeof v === "number") cls = v < 0 ? "neg" : "pos";
-      const disp = c === "% change" && v != null ? (v>0?"+":"") + v + "%" : fmt(v, c);
-      return `<td class="${cls}">${disp}</td>`;
+      const c = t.columns[i]; let cls = "";
+      if (c.includes("— Δ") && typeof v === "number") cls = v < 0 ? "neg" : "pos";
+      return `<td class="${cls}">${fmt(v,c)}</td>`;
     }).join("") + "</tr>";
   }
-  table.innerHTML = h + "</tbody></table>";
+  const d = document.createElement("div"); d.innerHTML = h + "</tbody></table>"; return d;
+}
+function downloadCSV(cols, data, name){
+  const esc = x => x==null ? "" : `"${(""+x).replace(/"/g,'""')}"`;
+  const lines = [cols.map(esc).join(",")].concat(data.map(r => r.map(esc).join(",")));
+  const blob = new Blob([lines.join("\n")], {type:"text/csv"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+}
+function renderTables(j){
+  const T = document.getElementById("tables"); T.innerHTML = "";
+  j.tables.forEach(t => {
+    const wrap = document.createElement("div"); wrap.style.marginBottom = "22px";
+    const h = document.createElement("h3"); h.textContent = t.label; h.style.margin = "10px 0 6px"; wrap.append(h);
+    const bar = document.createElement("div"); bar.className = "bar";
+    const cBtn = document.createElement("button"); cBtn.className = "sec"; cBtn.textContent = "Show code";
+    cBtn.onclick = () => { lastRepro = t.reproduce; showCode(curLang); codeBox.open = true; codeBox.scrollIntoView({behavior:"smooth"}); };
+    const vBtn = document.createElement("button"); vBtn.className = "sec"; vBtn.textContent = "CSV";
+    vBtn.onclick = () => downloadCSV(t.columns, t.data, (t.dimension||"table") + ".csv");
+    bar.append(cBtn, vBtn); wrap.append(bar, renderOne(t));
+    T.append(wrap);
+  });
 }
 
 // --- reproduce code panel: language toggle, download, open-in-Colab ---
@@ -247,11 +275,16 @@ openColab.onclick = async () => {
 };
 
 copyLink.onclick = () => { navigator.clipboard.writeText(location.href); status.textContent = "Link copied"; };
-csv.onclick = () => {
-  if (!lastData) return;
-  const lines = [lastCols.join(",")].concat(lastData.map(r => r.map(x => x==null?"":`"${x}"`).join(",")));
-  const blob = new Blob([lines.join("\n")], {type:"text/csv"});
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "table.csv"; a.click();
+// disaggregated: the record-level rows behind the current filters/period
+records.onclick = async () => {
+  status.textContent = "Fetching matching records…";
+  try {
+    const res = await fetch("/api/detail?" + buildParams().toString());
+    const j = await res.json();
+    if (j.error){ status.textContent = "Error: " + j.error; return; }
+    downloadCSV(j.columns, j.data, "records.csv");
+    status.textContent = `${j.count} records${j.truncated ? " (capped at 100k)" : ""}`;
+  } catch(e){ status.textContent = "Error: " + e.message; }
 };
 go.onclick = run;
 loadFromURL();

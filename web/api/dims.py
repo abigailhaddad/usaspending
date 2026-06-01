@@ -28,7 +28,9 @@ DIMENSIONS = {
     "state":            {"col": "recipient_state_code", "label": "Recipient state"},
     "county":           {"col": "recipient_county_name", "label": "Recipient county"},
     "naics":            {"col": "naics_code", "label": "NAICS code"},
+    "naics_desc":       {"col": "naics_description", "label": "Industry (NAICS)"},
     "psc":              {"col": "product_or_service_code", "label": "PSC (product/service)"},
+    "psc_desc":         {"col": "product_or_service_code_description", "label": "Product/service"},
     "award_type":       {"col": "award_type_code", "label": "Award type", "coded": True},
     "extent_competed":  {"col": "extent_competed", "label": "Competition", "coded": True},
     "set_aside":        {"col": "type_of_set_aside", "label": "Set-aside", "coded": True},
@@ -51,6 +53,22 @@ METRICS = {
 }
 
 DATE_COL = "action_date"
+
+# Columns returned by the disaggregated (record-level) download, per dataset.
+DETAIL_COLUMNS = {
+    "contracts": [
+        "award_id_piid", "recipient_name", "recipient_uei", "awarding_agency_name",
+        "funding_sub_agency_name", "action_date", "federal_action_obligation",
+        "naics_code", "product_or_service_code", "extent_competed",
+        "recipient_state_code", "recipient_county_name", "award_type_code",
+    ],
+    "assistance": [
+        "award_id_fain", "recipient_name", "recipient_uei", "awarding_agency_name",
+        "funding_sub_agency_name", "action_date", "federal_action_obligation",
+        "cfda_number", "assistance_type_code",
+        "recipient_state_code", "recipient_county_name",
+    ],
+}
 
 
 def parse_filters(params):

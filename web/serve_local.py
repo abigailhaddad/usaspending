@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(WEB, "api"))
 import table          # noqa: E402
 import filter_options  # noqa: E402
 import colab          # noqa: E402
+import downloads      # noqa: E402
 
 
 class H(SimpleHTTPRequestHandler):
@@ -36,6 +37,10 @@ class H(SimpleHTTPRequestHandler):
         q = parse_qs(urlparse(self.path).query)
         if path == "/api/table":
             return self._json(lambda: table.build_response(q))
+        if path == "/api/detail":
+            return self._json(lambda: table.detail_response(q))
+        if path == "/api/downloads":
+            return self._json(downloads.build_index)
         if path == "/api/filter_options":
             return self._json(lambda: filter_options.build_options(
                 q.get("field", ["state"])[0], q.get("dataset", ["contracts"])[0]))

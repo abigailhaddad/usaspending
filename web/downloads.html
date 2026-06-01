@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USAspending — Data Downloads</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; color: #1a1a1a; }
+  header { background: #0b3d63; color: #fff; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 20px; } header p { margin: 4px 0 0; opacity: .85; font-size: 13px; }
+  nav a { color: #cfe3f3; margin-right: 16px; text-decoration: none; font-weight: 600; font-size: 13px; }
+  nav a.active { color: #fff; text-decoration: underline; }
+  .wrap { padding: 24px; max-width: 900px; }
+  h2 { font-size: 17px; border-bottom: 2px solid #0b3d63; padding-bottom: 4px; margin-top: 28px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin-top: 8px; }
+  th, td { border-bottom: 1px solid #e1e4e8; padding: 7px 10px; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  a { color: #0b57d0; } .muted { color: #57606a; font-size: 13px; }
+  .pill { display:inline-block; background:#eef3f8; border-radius: 10px; padding: 1px 8px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>USAspending bulk data</h1>
+  <p>Public-domain federal contract &amp; assistance spending as clean parquet — download whole
+     files, or build custom tables in the <a href="/" style="color:#fff">Table Builder</a>.</p>
+  <nav><a href="/">Table Builder</a><a href="/downloads.html" class="active">Data Downloads</a></nav>
+</header>
+<div class="wrap">
+  <p id="hf" class="muted"></p>
+
+  <h2>Reference &amp; data dictionary</h2>
+  <table id="reference"><tbody></tbody></table>
+
+  <h2>Spending files <span class="muted">(by dataset &amp; fiscal year, newest first)</span></h2>
+  <p class="muted">Each fiscal year is published as parquet partitioned by agency. Browse a year to
+     download its files, or pull everything with the snippet below.</p>
+  <table id="spending"><thead><tr><th>Dataset</th><th>Fiscal year</th><th>Files</th><th>Rows</th><th>Size</th><th></th></tr></thead><tbody></tbody></table>
+
+  <h2>Grab the whole dataset (DuckDB)</h2>
+  <pre style="background:#0d1117;color:#c9d1d9;padding:12px;border-radius:6px;overflow-x:auto;font-size:12px">import duckdb
+con = duckdb.connect(); con.execute("INSTALL httpfs; LOAD httpfs;")
+df = con.sql("SELECT * FROM read_parquet('hf://datasets/abigailhaddad/usaspending-bulk-awards/contracts/**/*.parquet', hive_partitioning=true)").df()</pre>
+</div>
+
+<script>
+const fmtBytes = b => b > 1e9 ? (b/1e9).toFixed(2)+" GB" : (b/1e6).toFixed(1)+" MB";
+const fmtNum = n => n.toLocaleString();
+fetch("/api/downloads").then(r=>r.json()).then(j=>{
+  document.getElementById("hf").innerHTML =
+    `Full dataset on HuggingFace: <a href="${j.hf_dataset}" target="_blank">${j.hf_dataset.replace('https://','')}</a>`;
+  const ref = document.querySelector("#reference tbody");
+  for (const r of j.reference)
+    ref.insertAdjacentHTML("beforeend",
+      `<tr><td>${r.desc}</td><td><a href="${r.url}">download .parquet</a></td></tr>`);
+  const sp = document.querySelector("#spending tbody");
+  if (!j.spending.length) sp.insertAdjacentHTML("beforeend", `<tr><td colspan="6" class="muted">Backfill in progress…</td></tr>`);
+  for (const s of j.spending)
+    sp.insertAdjacentHTML("beforeend",
+      `<tr><td>${s.dataset}</td><td>${s.fiscal_year}</td><td>${s.files}</td>` +
+      `<td>${fmtNum(s.rows)}</td><td>${fmtBytes(s.bytes)}</td>` +
+      `<td><a href="${s.browse}" target="_blank">browse / download</a></td></tr>`);
+});
+</script>
+</body>
+</html>

@@ -9263,6 +9263,14 @@
     "rows": 28679,
     "updated_at": "2026-06-01T16:42:07.812948+00:00"
   },
+  "assistance/2024/050": {
+    "datestamp": "20260506",
+    "etag": "e92301bb9a8c71417e6e8809098f8460",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2024/agency=050/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T16:42:46.232904+00:00"
+  },
   "assistance/2025/003": {
     "datestamp": "20260506",
     "etag": "dc226ccf5dc43ad55c7c21cf0390a040",

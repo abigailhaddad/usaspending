@@ -93,6 +93,9 @@ def detail_response(params, limit=100000):
     clauses, binds = parse_filters(params)
     req = dict(dataset=dataset, periodA=pa, periodB=pb,
                filter_clauses=clauses, filter_binds=binds)
+    raw = params.get("limit", [""])[0]  # preview rows (table) vs full (download)
+    if raw.isdigit():
+        limit = min(int(raw), 100000)
     sql, qbinds, cols = query.build_detail_sql(req, limit)
     con = get_conn()
     rows = con.execute(sql.format(src=source_expr(dataset)), qbinds).fetchall()

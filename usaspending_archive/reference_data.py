@@ -88,9 +88,28 @@ def _glossary() -> list[dict]:
     return _get("references/glossary/")["results"]
 
 
+def _agency_codes() -> list[dict]:
+    """CGAC AGENCY CODE -> AGENCY NAME from the archive's agency_codes.csv — the FULL
+    crosswalk for the archive's per-agency partition codes (covers the long tail that
+    references/toptier_agencies misses)."""
+    import csv
+    import io
+    text = urllib.request.urlopen(
+        "https://files.usaspending.gov/reference_data/agency_codes.csv", timeout=60
+    ).read().decode("utf-8-sig")
+    out, seen = [], set()
+    for row in csv.DictReader(io.StringIO(text)):
+        c = (row.get("CGAC AGENCY CODE") or "").strip()
+        if c and c not in seen:
+            seen.add(c)
+            out.append({"cgac_code": c, "agency_name": (row.get("AGENCY NAME") or "").strip()})
+    return out
+
+
 SPECS = {
     "data_dictionary": _data_dictionary,
     "toptier_agencies": lambda: _get("references/toptier_agencies/")["results"],
+    "agency_codes": _agency_codes,
     "def_codes": lambda: _get("references/def_codes/")["codes"],
     "glossary": _glossary,
     "assistance_listing": lambda: _get("references/assistance_listing/"),
@@ -106,6 +125,7 @@ def write_table(name: str, rows: list[dict]) -> Path:
 
 
 def snapshot_all() -> None:
+    import os
     for name, fn in SPECS.items():
         try:
             rows = fn()
@@ -113,6 +133,13 @@ def snapshot_all() -> None:
             print(f"{name:20s} {len(rows):>6} rows -> {out.relative_to(ROOT)} ({out.stat().st_size/1e3:.0f} KB)")
         except Exception as exc:
             print(f"{name:20s} FAILED: {exc}")
+    if os.environ.get("HF_TOKEN"):  # publish to the HF dataset's reference/ folder
+        from huggingface_hub import HfApi
+        api = HfApi(token=os.environ["HF_TOKEN"])
+        for p in sorted(OUT.glob("*.parquet")):
+            api.upload_file(path_or_fileobj=str(p), path_in_repo=f"reference/{p.name}",
+                            repo_id="abigailhaddad/usaspending-bulk-awards", repo_type="dataset")
+            print(f"uploaded reference/{p.name}")
 
 
 if __name__ == "__main__":

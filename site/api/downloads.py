@@ -42,11 +42,18 @@ def agency_names():
             import duckdb
             con = duckdb.connect()
             con.execute("INSTALL httpfs; LOAD httpfs;")
-            rows = con.execute(
-                f"SELECT toptier_code, agency_name FROM read_parquet('{RESOLVE}reference/toptier_agencies.parquet')"
-            ).fetchall()
+            _AGENCY_NAMES = {}
+            # full CGAC crosswalk (covers the long tail); fall back to toptier list
+            for ref, code_col in [("agency_codes", "cgac_code"), ("toptier_agencies", "toptier_code")]:
+                try:
+                    for c, nm in con.execute(
+                        f"SELECT {code_col}, agency_name FROM read_parquet('{RESOLVE}reference/{ref}.parquet')"
+                    ).fetchall():
+                        if c and nm and c not in _AGENCY_NAMES:
+                            _AGENCY_NAMES[c] = nm
+                except Exception:
+                    pass
             con.close()
-            _AGENCY_NAMES = {c: nm for c, nm in rows if c}
         except Exception:
             _AGENCY_NAMES = {}
     return _AGENCY_NAMES

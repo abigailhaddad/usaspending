@@ -52,7 +52,7 @@ class H(SimpleHTTPRequestHandler):
         if urlparse(self.path).path == "/api/colab":
             n = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(n) or b"{}")
-            return self._json(lambda: {"colab_url": colab.make_colab(body["code"], body.get("title"))})
+            return self._json(lambda: {"colab_url": colab.make_colab(body["sql"], body.get("title"))})
         self.send_error(404)
 
 

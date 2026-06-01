@@ -148,7 +148,7 @@ export default function TableBuilder() {
     if (!repro) return;
     setStatus("Creating Colab notebook…");
     try {
-      const j = await (await fetch("/api/colab", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: repro.python }) })).json();
+      const j = await (await fetch("/api/colab", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql: repro.sql }) })).json();
       if (j.colab_url) { window.open(j.colab_url, "_blank"); setStatus("Opened in Colab"); }
       else setStatus("Colab error: " + (j.error || "?"));
     } catch (e) { setStatus("Colab error: " + (e as Error).message); }
@@ -182,7 +182,7 @@ export default function TableBuilder() {
         </div>
       </Step>
 
-      <Step n={2} title="Select a timeframe" hint="Leave blank for all time. Tip: break down by “Month” in step 3 to see every month in the range.">
+      <Step n={2} title="Select a timeframe" hint="Leave blank for all time. Tip: group by “Month” in step 3 to see every month in the range.">
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <span className="w-20 text-sm font-medium">Period A</span>
@@ -200,10 +200,10 @@ export default function TableBuilder() {
         </div>
       </Step>
 
-      <Step n={3} title="Select table elements" hint="Each “break down by” makes its own table. Pick one or more measures.">
+      <Step n={3} title="Select table elements" hint="Each “group by” makes its own table. Pick one or more measures to aggregate.">
         <div className="space-y-4">
           <div>
-            <Label className="mb-1.5 block">Break down by</Label>
+            <Label className="mb-1.5 block">Group by</Label>
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(DIMENSIONS).map(([k, v]) => (
                 <Badge key={k} variant={rows.includes(k) ? "default" : "outline"} className="cursor-pointer" onClick={() => toggle(rows, k, setRows)}>{v}</Badge>

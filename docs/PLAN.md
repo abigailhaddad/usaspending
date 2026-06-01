@@ -120,8 +120,12 @@ Built:
 - `.github/workflows/refresh.yml` — runs backfill (HF_TOKEN secret set), commits the manifest,
   self-chains via `gh workflow run` (GITHUB_TOKEN, `actions: write`) while files remain;
   weekly Monday cron. Mirrors OPM's chain pattern.
-- **TODO:** trigger the first chained backfill run; flip dataset public when complete;
-  add R2 mirror call in the website phase.
+- **Validated on Actions (agency 389):** run 1 processed 15 files then hit the throttle →
+  `CHAIN_NEEDED` → run 2 resumed from the committed manifest, finished the last 5, stopped.
+  Manifest-resumable, scope-preserving self-chain, idempotent. All 20 of 389's contract years
+  live in HF.
+- **TODO:** launch the full (unscoped) backfill — ~4,520 files ≈ many chained runs; flip
+  dataset public when complete; add R2 mirror call in the website phase.
 
 **Goal:** stay current automatically; never re-process unchanged files.
 

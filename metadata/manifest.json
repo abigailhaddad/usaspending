@@ -3231,6 +3231,62 @@
     "rows": 0,
     "updated_at": "2026-06-01T13:53:52.250795+00:00"
   },
+  "assistance/2010/3301": {
+    "datestamp": "20260506",
+    "etag": "453ebe440869b3e27778223719fd835a",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2010/agency=3301/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "assistance/2010/3302": {
+    "datestamp": "20260506",
+    "etag": "7fd39d19f8e20186ce82eb51df723efe",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2010/agency=3302/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "assistance/2010/3303": {
+    "datestamp": "20260506",
+    "etag": "8a5cf00014f2261c8614e44087f6e005",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2010/agency=3303/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "assistance/2010/338": {
+    "datestamp": "20260506",
+    "etag": "d94da6f24399410b15b4792a4c97b274",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2010/agency=338/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "assistance/2010/339": {
+    "datestamp": "20260506",
+    "etag": "65d379a645c30090b2579b93eb18348f",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2010/agency=339/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "assistance/2010/345": {
+    "datestamp": "20260506",
+    "etag": "977fcd4346d54d98996d0c49dc6617ab",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2010/agency=345/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "assistance/2010/347": {
+    "datestamp": "20260506",
+    "etag": "2971e7a1e9f8577bfc41b78fb6c91611",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2010/agency=347/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
   "contracts/2007/003": {
     "datestamp": "20260506",
     "etag": "d296ec9a2363ba25208c5f942f2d545e",
@@ -6462,6 +6518,54 @@
     "parquet_key": "contracts/fiscal_year=2010/agency=3300/part.parquet",
     "rows": 3751,
     "updated_at": "2026-06-01T13:53:52.250795+00:00"
+  },
+  "contracts/2010/3301": {
+    "datestamp": "20260506",
+    "etag": "a08e82a4aa6a55ae2ee66058e61cf687",
+    "parquet_bytes": 116365,
+    "parquet_key": "contracts/fiscal_year=2010/agency=3301/part.parquet",
+    "rows": 215,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "contracts/2010/3302": {
+    "datestamp": "20260506",
+    "etag": "778860b8812e62d9a3d864308f1d2c52",
+    "parquet_bytes": 143423,
+    "parquet_key": "contracts/fiscal_year=2010/agency=3302/part.parquet",
+    "rows": 317,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "contracts/2010/3303": {
+    "datestamp": "20260506",
+    "etag": "ccaab8821b72ec4fdb7db97ee28bd7c7",
+    "parquet_bytes": 70268,
+    "parquet_key": "contracts/fiscal_year=2010/agency=3303/part.parquet",
+    "rows": 13,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "contracts/2010/338": {
+    "datestamp": "20260506",
+    "etag": "39e357341b0b3a4a9c68b8468c05371c",
+    "parquet_bytes": 12010,
+    "parquet_key": "contracts/fiscal_year=2010/agency=338/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "contracts/2010/339": {
+    "datestamp": "20260506",
+    "etag": "f0eeaa9bdc262bc9a87777237489b1f1",
+    "parquet_bytes": 167251,
+    "parquet_key": "contracts/fiscal_year=2010/agency=339/part.parquet",
+    "rows": 478,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
+  },
+  "contracts/2010/345": {
+    "datestamp": "20260506",
+    "etag": "0d7aadd5f21f79bb5dba2a215bcf7ecf",
+    "parquet_bytes": 12010,
+    "parquet_key": "contracts/fiscal_year=2010/agency=345/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T13:54:38.451090+00:00"
   },
   "contracts/2010/389": {
     "datestamp": "20260506",

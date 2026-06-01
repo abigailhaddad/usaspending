@@ -141,7 +141,20 @@ Built:
 - Refresh reference tables on the same cron.
 - **Deliverable:** hands-off weekly updates; manifest is the source of truth.
 
-## Phase 4.5 — Serving / transform layer (runs after backfill) — planned 2026-06-01
+## Phase 4.5 — Serving / transform layer (runs after backfill) — building 2026-06-01
+
+Built + validated (full runs execute post-backfill):
+- `codebook.py` ✅ — parses the dictionary's Domain Values into a value→label table:
+  **1,001 labels across 202 coded columns** (e.g. `extent_competed: A=FULL AND OPEN`,
+  `C=NOT COMPETED`). Prose entries skipped. Offline tests cover the code/prose split.
+- `transform.py` ✅ — `compact_year` (per-agency → one sorted file/year) and
+  `award_summary` (windowed dedup: latest transaction's row + obligation/count/date rollups).
+  Validated on a real slice: 252 txns → 170 awards (1 row/award), rollups correct
+  (e.g. a 6-transaction award summed to $1.88M).
+- TODO: run both across the full corpus after backfill; publish serving + awards trees;
+  embed dictionary definitions as Parquet column metadata; dictionary-driven `schema.py` typing.
+
+Original plan below.
 
 The raw per-agency files (what the backfill produces) are great for ETag incremental
 refresh but weak for queries: ~4,520 tiny files over hf://, transaction-level, 297 cols.

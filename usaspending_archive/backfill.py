@@ -27,6 +27,7 @@ from . import manifest
 from .archive_index import list_archive
 from .convert import csv_to_parquet
 from .fetch import IP_BLOCKED, download_zip, extract_csvs
+from .publish import publish_to_hf
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "metadata" / "manifest.json"
@@ -58,34 +59,42 @@ def main() -> int:
     con = duckdb.connect()
     done = 0
     blocked = False
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        for f in todo:
-            zp = download_zip(f.url)
-            if isinstance(zp, str):
-                print(f"{f.key}  -> {zp}")
-                if zp == IP_BLOCKED:
-                    blocked = True
-                    break
-                continue
-            csvs = extract_csvs(zp, tmp / "x")
-            parquet = tmp / "part.parquet"
-            info = csv_to_parquet(csvs, parquet, con)
-            api.upload_file(
-                path_or_fileobj=str(parquet), path_in_repo=manifest.parquet_key(f),
-                repo_id=HF_REPO, repo_type="dataset",
-                commit_message=f"{manifest.logical_id(f)} ({info['rows']:,} rows)",
-            )
-            manifest.record(m, f, rows=info["rows"], parquet_bytes=info["bytes"],
-                            updated_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
-            manifest.save(MANIFEST, m)  # persist after every file -> resumable
-            done += 1
-            print(f"{manifest.parquet_key(f):55s} {info['rows']:>9,} rows  {info['bytes']/1e6:6.1f}MB")
-            # clean per-file temps
-            parquet.unlink(missing_ok=True)
-            zp.unlink(missing_ok=True)
-            for c in csvs:
-                c.unlink(missing_ok=True)
+    # Download + convert a batch locally, then push it as ONE HF commit. HF rate-limits
+    # commits (429), so one-commit-per-file does NOT scale — one commit per run does.
+    # Everything is wrapped so an unexpected error still exits cleanly and signals the
+    # chain (work remains) rather than crashing before CHAIN_NEEDED is printed.
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            staged: list[tuple[Path, str, object, dict]] = []  # (parquet, key, file, info)
+            for f in todo:
+                zp = download_zip(f.url)
+                if isinstance(zp, str):
+                    print(f"{f.key}  -> {zp}")
+                    if zp == IP_BLOCKED:
+                        blocked = True
+                        break
+                    continue
+                csvs = extract_csvs(zp, tmp / manifest.logical_id(f).replace("/", "_"))
+                parquet = tmp / (manifest.logical_id(f).replace("/", "_") + ".parquet")
+                info = csv_to_parquet(csvs, parquet, con)
+                staged.append((parquet, manifest.parquet_key(f), f, info))
+                print(f"{manifest.parquet_key(f):55s} {info['rows']:>9,} rows  {info['bytes']/1e6:6.1f}MB")
+                zp.unlink(missing_ok=True)
+                for c in csvs:
+                    c.unlink(missing_ok=True)
+
+            if staged:
+                publish_to_hf([(p, k) for p, k, _, _ in staged], HF_REPO,
+                              batch_size=len(staged))  # single commit for the whole run
+                now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                for _, _, f, info in staged:
+                    manifest.record(m, f, rows=info["rows"], parquet_bytes=info["bytes"],
+                                    updated_at=now)
+                manifest.save(MANIFEST, m)
+                done = len(staged)
+    except Exception as exc:
+        print(f"ERROR (progress through last commit is saved): {exc}")
 
     remaining = total_todo - done
     print(f"\nprocessed {done}, {remaining} changed files remain")

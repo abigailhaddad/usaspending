@@ -10,7 +10,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -19,7 +18,7 @@ import { DateRangePicker } from "@/components/date-range";
 import { DIMENSIONS, METRICS, FILTER_FIELDS, DATASETS } from "@/lib/registry";
 import { fmtCell } from "@/lib/format";
 
-type Repro = { sql: string; python: string; r: string };
+type Repro = { python: string; sql: string };
 type TableResult = {
   label: string; dimension: string; columns: string[];
   data: (string | number | null)[][]; reproduce: Repro;
@@ -60,7 +59,6 @@ export default function TableBuilder() {
   const [filters, setFilters] = useState<Filter[]>([]);
   const [tables, setTables] = useState<TableResult[]>([]);
   const [repro, setRepro] = useState<Repro | null>(null);
-  const [lang, setLang] = useState<"python" | "r" | "sql">("python");
   const [status, setStatus] = useState("");
   const loaded = useRef(false);
 
@@ -290,33 +288,21 @@ export default function TableBuilder() {
 
       {repro && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Reproduce this result</CardTitle>
-            <p className="text-sm text-muted-foreground">Runs against the public dataset on HuggingFace — anyone can verify it.</p>
+          <CardHeader className="flex flex-row items-start justify-between space-y-0">
+            <div>
+              <CardTitle className="text-base">Reproduce this result</CardTitle>
+              <p className="text-sm text-muted-foreground">This is the exact query the table above ran, against the public dataset — run it and you get the same numbers.</p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button variant="outline" size="sm" onClick={openColab}>▶ Open in Colab</Button>
+              <Button variant="outline" size="sm" onClick={() => {
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(new Blob([repro.python], { type: "text/plain" })); a.download = "reproduce.py"; a.click();
+              }}>Download .py</Button>
+            </div>
           </CardHeader>
           <CardContent>
-            <Tabs value={lang} onValueChange={(v) => setLang(v as typeof lang)}>
-              <div className="mb-3 flex items-center justify-between">
-                <TabsList>
-                  <TabsTrigger value="python">Python</TabsTrigger>
-                  <TabsTrigger value="r">R</TabsTrigger>
-                  <TabsTrigger value="sql">SQL</TabsTrigger>
-                </TabsList>
-                <div className="flex gap-2">
-                  {lang === "python" && <Button variant="outline" size="sm" onClick={openColab}>▶ Open in Colab</Button>}
-                  <Button variant="outline" size="sm" onClick={() => {
-                    const ext = { python: "py", r: "R", sql: "sql" }[lang];
-                    const a = document.createElement("a");
-                    a.href = URL.createObjectURL(new Blob([repro[lang]], { type: "text/plain" })); a.download = "reproduce." + ext; a.click();
-                  }}>Download</Button>
-                </div>
-              </div>
-              {(["python", "r", "sql"] as const).map((l) => (
-                <TabsContent key={l} value={l}>
-                  <pre className="overflow-auto whitespace-pre-wrap rounded-md bg-zinc-900 p-4 font-mono text-xs text-zinc-100">{repro[l]}</pre>
-                </TabsContent>
-              ))}
-            </Tabs>
+            <pre className="overflow-auto whitespace-pre-wrap rounded-md bg-zinc-900 p-4 font-mono text-xs text-zinc-100">{repro.python}</pre>
           </CardContent>
         </Card>
       )}

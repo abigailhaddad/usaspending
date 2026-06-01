@@ -17,8 +17,12 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def hf_source(dataset):
-    return (f"read_parquet('hf://datasets/{HF_REPO}/{dataset}/**/*.parquet', "
-            f"hive_partitioning=true, union_by_name=true)")
+    # The SERVING layer: one parquet per fiscal year (serve/{dataset}/{fy}.parquet).
+    # ~20 files per product, so DuckDB lists a single dir — no recursive partition
+    # listing, no HuggingFace 429. This is the exact source the site queries too, so
+    # the reproduce code runs the identical query against identical data.
+    return (f"read_parquet('hf://datasets/{HF_REPO}/serve/{dataset}/*.parquet', "
+            f"union_by_name=true)")
 
 
 def _mask(period):
@@ -132,50 +136,24 @@ def _inline(sql, binds):
 DUCKDB_VERSION = "1.5.2"
 
 
-def reproduce(req):
-    """The exact query against the PUBLIC HF dataset, in SQL, Python, and R — version-pinned."""
-    sql, binds = build_sql(req)
-    sql_hf = _inline(sql.format(src=hf_source(req["dataset"])), binds)
-    q = (sql_hf.replace(" FROM ", "\n  FROM ").replace(" WHERE ", "\n  WHERE ")
-               .replace(" GROUP BY ", "\n  GROUP BY "))
-
-    header = "Reproduce this exact result from the public USAspending dataset on HuggingFace."
-    sql_script = (
-        f"-- {header}\n-- DuckDB {DUCKDB_VERSION} — run in the DuckDB CLI or any DuckDB client.\n"
-        f"INSTALL httpfs; LOAD httpfs;\n{q};\n"
-    )
-    python = (
-        f"# {header}\n# pip install duckdb=={DUCKDB_VERSION}\n"
-        "import duckdb\n"
-        "con = duckdb.connect()\n"
-        'con.execute("INSTALL httpfs; LOAD httpfs;")\n'
-        f'con.sql(r"""\n{q}\n""").show()\n'
-    )
-    r = (
-        f"# {header}\n"
-        f'# install.packages("duckdb")  # version {DUCKDB_VERSION}\n'
-        "library(duckdb)\n"
-        "con <- dbConnect(duckdb())\n"
-        'dbExecute(con, "INSTALL httpfs; LOAD httpfs;")\n'
-        f'print(dbGetQuery(con, r"(\n{q}\n)"))\n'
-    )
-    return {"sql": sql_script, "python": python, "r": r}
-
-
 def _render_code(sql_hf):
+    """One faithful artifact: the EXACT query the table ran, wrapped in a minimal Python
+    runner so it both shows the query and executes it. Same SQL + same public serving
+    layer as the site → it reproduces the table by construction and can't diverge."""
     q = (sql_hf.replace(" FROM ", "\n  FROM ").replace(" WHERE ", "\n  WHERE ")
                .replace(" GROUP BY ", "\n  GROUP BY ").replace(" FULL JOIN ", "\n  FULL JOIN "))
-    header = "Reproduce this exact result from the public USAspending dataset on HuggingFace."
-    return {
-        "sql": f"-- {header}\n-- DuckDB {DUCKDB_VERSION}\nINSTALL httpfs; LOAD httpfs;\n{q};\n",
-        "python": (f"# {header}\n# pip install duckdb=={DUCKDB_VERSION}\nimport duckdb\n"
-                   "con = duckdb.connect()\ncon.execute(\"INSTALL httpfs; LOAD httpfs;\")\n"
-                   f'con.sql(r"""\n{q}\n""").show()\n'),
-        "r": (f"# {header}\n# install.packages(\"duckdb\")  # version {DUCKDB_VERSION}\n"
-              "library(duckdb)\ncon <- dbConnect(duckdb())\n"
-              'dbExecute(con, "INSTALL httpfs; LOAD httpfs;")\n'
-              f'print(dbGetQuery(con, r"(\n{q}\n)"))\n'),
-    }
+    header = "This is the exact query the table ran, against the public USAspending dataset."
+    python = (
+        f"# {header}\n# pip install duckdb=={DUCKDB_VERSION}\nimport duckdb\n"
+        "con = duckdb.connect()\ncon.execute(\"INSTALL httpfs; LOAD httpfs;\")\n"
+        f'con.sql(r"""\n{q}\n""").show()\n'
+    )
+    return {"python": python, "sql": q}
+
+
+def reproduce(req):
+    sql, binds = build_sql(req)
+    return _render_code(_inline(sql.format(src=hf_source(req["dataset"])), binds))
 
 
 def reproduce_multi(req):

@@ -52,6 +52,8 @@ def main() -> int:
         todo = [f for f in todo if f.agency_code == args.agency]
     if args.product:
         todo = [f for f in todo if f.award_type == args.product]
+    # newest fiscal years first — recent spending is what most analyses want
+    todo.sort(key=lambda f: f.fiscal_year, reverse=True)
     total_todo = len(todo)
     todo = todo[:args.max_files]
     print(f"{total_todo} changed files; processing up to {len(todo)} this run; HF repo {HF_REPO}")

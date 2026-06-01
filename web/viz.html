@@ -65,14 +65,14 @@ async function agg(dim, top){
 }
 function hbar(div, rows){
   rows = rows.slice().reverse();
-  const lbl = s => { s = String(s); return s.length > 32 ? s.slice(0,31) + "…" : s; };
-  Plotly.newPlot(div, [{type:"bar", orientation:"h", y: rows.map(r=>lbl(r[0])),
-    customdata: rows.map(r=>String(r[0])),
-    x: rows.map(r=>B(r[1])), marker:{color:GREEN}, hovertemplate:"%{customdata}<br>$%{x:.2f}B<extra></extra>"}],
-    baseLayout({margin:{l:208,r:16,t:6,b:36}, height:320,  // fixed margin fits truncated labels (no automargin timing glitch)
+  // full labels (no truncation -> no category collisions); automargin sizes the gutter
+  Plotly.newPlot(div, [{type:"bar", orientation:"h", y: rows.map(r=>String(r[0])),
+    x: rows.map(r=>B(r[1])), marker:{color:GREEN}, hovertemplate:"%{y}<br>$%{x:.2f}B<extra></extra>"}],
+    baseLayout({margin:{l:10,r:16,t:6,b:36}, height:340,
       xaxis:{title:"$ billions", gridcolor:GRID, zeroline:false, linecolor:GRID},
-      yaxis:{ticklabelposition:"outside"}}),
+      yaxis:{automargin:true}}),
     {displayModeBar:false, responsive:true});
+  setTimeout(() => { try { Plotly.Plots.resize(div); } catch(e){} }, 120);
 }
 
 async function draw(){

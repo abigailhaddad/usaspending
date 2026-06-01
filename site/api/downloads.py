@@ -62,29 +62,33 @@ def agency_names():
 def build_index():
     manifest = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
     names = agency_names()
-    years = defaultdict(lambda: {"rows": 0})
+    year_total = {}                                     # (product, fy) -> All-file rows (authoritative)
+    year_sum = defaultdict(int)                         # per-agency sum (fallback if no All file)
     by_agency = defaultdict(lambda: defaultdict(list))  # dataset -> code -> [{fy,rows,url}]
     for logical_id, e in manifest.items():
         product, fy, code = logical_id.split("/")
         rows = e.get("rows", 0) or 0
-        years[(product, fy)]["rows"] += rows
-        if rows > 0:  # skip empty per-agency files (archive emits one per agency-year even w/ no awards)
+        if code == "All":               # the archive's complete per-year file (not an agency)
+            year_total[(product, fy)] = rows
+            continue
+        year_sum[(product, fy)] += rows
+        if rows > 0:                    # skip empty per-agency files (archive emits one even w/ no awards)
             by_agency[product][code].append(
                 {"fiscal_year": fy, "rows": rows, "url": RESOLVE + e["parquet_key"]})
 
     # one clean file per (dataset, fiscal year) — the serving layer, direct download
-    serve = [{"dataset": p, "fiscal_year": fy, "rows": v["rows"],
+    serve = [{"dataset": p, "fiscal_year": fy, "rows": year_total.get((p, fy), year_sum[(p, fy)]),
               "url": f"{RESOLVE}serve/{p}/{fy}.parquet"}
-             for (p, fy), v in sorted(years.items(), key=lambda kv: (kv[0][0], kv[0][1]), reverse=True)]
+             for (p, fy) in sorted(set(year_total) | set(year_sum), reverse=True)]
 
-    # per-agency files, grouped + named, newest year first
+    # per-agency files, named, newest year first; named agencies first, then unnamed codes
     agencies = {}
     for product, codes in by_agency.items():
         agencies[product] = sorted(
             [{"code": c, "name": names.get(c, c),
               "files": sorted(fs, key=lambda x: x["fiscal_year"], reverse=True)}
              for c, fs in codes.items()],
-            key=lambda a: a["name"])
+            key=lambda a: (a["name"] == a["code"], a["name"].lower()))
 
     reference = [{"name": n, "desc": d, "url": f"{RESOLVE}reference/{n}.parquet"} for n, d in REFERENCE]
     return {"hf_dataset": f"https://huggingface.co/datasets/{HF_REPO}",

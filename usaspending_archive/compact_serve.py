@@ -45,19 +45,27 @@ def main() -> int:
 
     m = load(MANIFEST)
     groups: dict[tuple[str, str], list[str]] = defaultdict(list)
+    all_url = {}  # (product, fy) -> the archive's complete per-year "All" file
     for logical_id, e in m.items():
-        product, fy, _ = logical_id.split("/")
+        product, fy, code = logical_id.split("/")
         if args.product and product != args.product:
             continue
         if args.years and fy not in args.years.split(","):
             continue
-        groups[(product, fy)].append(RESOLVE + e["parquet_key"])
+        if code == "All":
+            all_url[(product, fy)] = RESOLVE + e["parquet_key"]
+        else:
+            groups[(product, fy)].append(RESOLVE + e["parquet_key"])
 
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs;")
     con.execute("SET memory_limit='12GB'; SET temp_directory='/tmp/duckspill';")  # spill, don't OOM
-    print(f"compacting {len(groups)} (product, year) groups → serve/")
-    for (product, fy), urls in sorted(groups.items()):
+    keys = sorted(set(list(all_url) + list(groups)))
+    print(f"compacting {len(keys)} (product, year) groups → serve/")
+    for (product, fy) in keys:
+        # The archive already ships a complete per-year "All" file — use it (one file, no
+        # merge, no double-count). Only fall back to merging per-agency files if All is absent.
+        urls = [all_url[(product, fy)]] if (product, fy) in all_url else groups[(product, fy)]
         ts = time.time()
         files = "[" + ", ".join("'" + u + "'" for u in urls) + "]"
         with tempfile.TemporaryDirectory() as td:

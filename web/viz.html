@@ -75,7 +75,9 @@ async function draw(){
   const yr = (await agg("fiscal_year")).filter(r=>/^\d{4}$/.test(r[0])).sort((a,b)=>a[0].localeCompare(b[0]));
   Plotly.newPlot("byYear", [{type:"bar", x: yr.map(r=>r[0]), y: yr.map(r=>B(r[1])), marker:{color:GREEN},
     hovertemplate:"FY%{x}<br>$%{y:.2f}B<extra></extra>"}],
-    baseLayout({margin:{l:56,r:20,t:8,b:38}, height:300, yaxis:{title:"$ billions", gridcolor:"#E8DDD0"}}),
+    baseLayout({margin:{l:56,r:20,t:8,b:38}, height:300,
+      xaxis:{type:"category"},  // discrete years, not a 2,024.5 number axis
+      yaxis:{title:"$ billions", gridcolor:"#E8DDD0"}}),
     {displayModeBar:false, responsive:true});
 
   hbar("byAgency", await agg("awarding_agency", 15), GREEN);

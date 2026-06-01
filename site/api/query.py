@@ -11,7 +11,7 @@ comparison, allowlisted filters. (Column crosstab + more metrics are incremental
 """
 import re
 
-from dims import DATE_COL, DATASETS, DIMENSIONS, METRICS, OBL, UEI, HF_REPO, parse_filters
+from dims import DATE_COL, DATASETS, DIMENSIONS, METRICS, OBL, UEI, HF_REPO, parse_filters, resolve_col
 
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -40,11 +40,11 @@ def build_sql(req):
     Returns (sql_template_with_{src}, binds)."""
     if req["dataset"] not in DATASETS:
         raise ValueError("bad dataset")
-    if req["rows"] not in DIMENSIONS:
-        raise ValueError("bad row dimension")
     if req["metric"] not in METRICS:
         raise ValueError("bad metric")
-    rcol = DIMENSIONS[req["rows"]]["col"]
+    rcol = resolve_col(req["rows"])  # curated dim, alias, or any valid column
+    if not rcol:
+        raise ValueError("bad row dimension")
     where = req.get("filter_clauses", [])
     binds = list(req.get("filter_binds", []))
     pa, pb = req.get("periodA"), req.get("periodB")

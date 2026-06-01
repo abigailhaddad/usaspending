@@ -39,6 +39,8 @@ class H(SimpleHTTPRequestHandler):
             return self._json(lambda: table.build_response(q))
         if path == "/api/detail":
             return self._json(lambda: table.detail_response(q))
+        if path == "/api/fields":
+            return self._json(lambda: table.fields_response(q))
         if path == "/api/downloads":
             return self._json(downloads.build_index)
         if path == "/api/filter_options":

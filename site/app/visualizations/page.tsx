@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { DateRangePicker } from "@/components/date-range";
 import { MultiSelect } from "@/components/multi-select";
+import { FieldPicker } from "@/components/field-picker";
 import { DATASETS, FILTER_FIELDS } from "@/lib/registry";
 
 const GREEN = "#2d6a4f";
@@ -157,8 +158,9 @@ export default function Explorer() {
   const [dataset, setDataset] = useState("contracts");
   const [range, setRange] = useState<DateRange | undefined>();
   const [filters, setFilters] = useState<Record<string, string[]>>({});
-  const [addField, setAddField] = useState("");
+  const [labels, setLabels] = useState<Record<string, string>>({});
 
+  const flabel = (field: string) => labels[field] || FILTER_FIELDS[field] || field.replace(/_/g, " ");
   const setVals = (field: string, vals: string[]) => setFilters((f) => ({ ...f, [field]: vals }));
   const removeField = (field: string) => setFilters((f) => { const n = { ...f }; delete n[field]; return n; });
   const removeValue = (field: string, v: string) => setFilters((f) => {
@@ -174,7 +176,6 @@ export default function Explorer() {
   const qs = p.toString();
 
   const activeFields = Object.keys(filters);
-  const availableFields = Object.keys(FILTER_FIELDS).filter((k) => !activeFields.includes(k));
   const chips = Object.entries(filters).flatMap(([field, vals]) => vals.map((v) => ({ field, v })));
 
   return (
@@ -195,15 +196,13 @@ export default function Explorer() {
             <DateRangePicker value={range} onChange={setRange} placeholder="All dates" />
             {activeFields.map((field) => (
               <span key={field} className="inline-flex items-center">
-                <MultiSelect field={field} dataset={dataset} label={FILTER_FIELDS[field]}
+                <MultiSelect field={field} dataset={dataset} label={flabel(field)}
                   value={filters[field]} onChange={(v) => setVals(field, v)} />
                 <button className="ml-1 text-muted-foreground hover:text-foreground" onClick={() => removeField(field)} title="remove filter">✕</button>
               </span>
             ))}
-            <Select value={addField} onValueChange={(f) => { setVals(f, filters[f] || []); setAddField(""); }}>
-              <SelectTrigger className="h-9 w-36 border-dashed"><SelectValue placeholder="+ Add filter" /></SelectTrigger>
-              <SelectContent>{availableFields.map((k) => <SelectItem key={k} value={k}>{FILTER_FIELDS[k]}</SelectItem>)}</SelectContent>
-            </Select>
+            <FieldPicker dataset={dataset} exclude={activeFields}
+              onPick={(field, label) => { setLabels((l) => ({ ...l, [field]: label })); setVals(field, filters[field] || []); }} />
           </div>
           {(chips.length > 0 || range?.from) && (
             <div className="flex flex-wrap items-center gap-1.5 border-t pt-2">
@@ -213,7 +212,7 @@ export default function Explorer() {
               )}
               {chips.map(({ field, v }) => (
                 <Badge key={field + v} variant="secondary" className="gap-1">
-                  <span className="text-muted-foreground">{FILTER_FIELDS[field]}:</span> {v}
+                  <span className="text-muted-foreground">{flabel(field)}:</span> {v}
                   <button onClick={() => removeValue(field, v)}>✕</button>
                 </Badge>
               ))}

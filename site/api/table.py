@@ -26,7 +26,7 @@ def _clean(v):
     return v
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dims import DIMENSIONS, METRICS, parse_filters
+from dims import DIMENSIONS, METRICS, parse_filters, resolve_col
 import query
 from data_loader import get_conn, source_expr
 
@@ -56,13 +56,14 @@ def build_response(params):
     two = pb is not None
     tables = []
     for dim in dims:
-        if dim not in DIMENSIONS:
+        if not resolve_col(dim):  # curated dim, alias, or any valid column
             continue
+        dim_label = DIMENSIONS[dim]["label"] if dim in DIMENSIONS else dim.replace("_", " ")
         req = dict(base, rows=dim)
         sql, qbinds, mets, _ = query.build_multi_sql(req)
         df = con.execute(sql.format(src=src), qbinds).df()
 
-        columns = [DIMENSIONS[dim]["label"]]
+        columns = [dim_label]
         for m in mets:
             lab = METRICS[m]["label"]
             columns += [f"{lab} — A", f"{lab} — B", f"{lab} — Δ", f"{lab} — Δ%"] if two else [lab]
@@ -79,12 +80,23 @@ def build_response(params):
                 else:
                     row += [a]
             data.append(row)
-        tables.append({"dimension": dim, "label": DIMENSIONS[dim]["label"],
+        tables.append({"dimension": dim, "label": dim_label,
                        "columns": columns, "data": data, "reproduce": query.reproduce_multi(req)})
     con.close()
     return {"meta": {"dataset": dataset, "dims": dims, "metrics": metrics,
                      "periodA": pa, "periodB": pb, "tables": len(tables)},
             "tables": tables}
+
+
+def fields_response(params):
+    """Every column in the dataset, for the 'filter/break down by anything' picker."""
+    dataset = params.get("dataset", ["contracts"])[0]
+    con = get_conn()
+    cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {source_expr(dataset)}").fetchall()]
+    con.close()
+    # hide the hive partition virtuals; everything else is filterable/groupable
+    cols = [c for c in cols if c not in ("fiscal_year", "agency")]
+    return {"fields": [{"value": c, "label": c.replace("_", " ")} for c in cols]}
 
 
 def detail_response(params, limit=100000):

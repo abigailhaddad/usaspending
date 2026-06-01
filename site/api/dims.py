@@ -72,34 +72,52 @@ DETAIL_COLUMNS = {
 }
 
 
-def parse_filters(params):
-    """filter_<dim>=a|b (IN) and filter_<dim>_min/_max (range) -> (clauses, binds).
+import re
 
-    Only allowlisted dimension columns are filterable; values are always bound.
+_IDENT = re.compile(r"^[a-z0-9_]{1,80}$")
+# friendly aliases for a few raw code columns (codes are how people pin agencies)
+_ALIASES = {
+    "funding_subagency_code": "funding_sub_agency_code",
+    "awarding_subagency_code": "awarding_sub_agency_code",
+    "naics_code": "naics_code",
+    "psc_code": "product_or_service_code",
+}
+
+
+def resolve_col(field):
+    """SQL column expression for a field id: a curated dimension, a known alias, or ANY
+    raw column name (validated as a bare identifier so it can't inject; then quoted).
+    Returns None if the field isn't a safe identifier."""
+    if field in DIMENSIONS:
+        return DIMENSIONS[field]["col"]
+    if field in _ALIASES:
+        return _ALIASES[field]
+    if _IDENT.match(field):
+        return '"' + field + '"'
+    return None
+
+
+def parse_filters(params):
+    """filter_<field>=a|b (IN) and filter_<field>_min/_max (range) -> (clauses, binds).
+
+    `field` may be any column (validated by resolve_col); values are always bound.
     """
     clauses, binds = [], []
-    col_for = {k: v["col"] for k, v in DIMENSIONS.items()}
-    # allow filtering on a few raw code columns too (codes are how people pin agencies)
-    col_for.update({
-        "funding_subagency_code": "funding_sub_agency_code",
-        "awarding_subagency_code": "awarding_sub_agency_code",
-        "naics_code": "naics_code",
-        "psc_code": "product_or_service_code",
-    })
     for key, vals in params.items():
-        if key.startswith("filter_") and key.endswith("_min"):
-            dim = key[len("filter_"):-len("_min")]
-            if dim in col_for:
-                clauses.append(f"TRY_CAST({col_for[dim]} AS DOUBLE) >= ?"); binds.append(float(vals[0]))
-        elif key.startswith("filter_") and key.endswith("_max"):
-            dim = key[len("filter_"):-len("_max")]
-            if dim in col_for:
-                clauses.append(f"TRY_CAST({col_for[dim]} AS DOUBLE) <= ?"); binds.append(float(vals[0]))
-        elif key.startswith("filter_"):
-            dim = key[len("filter_"):]
-            if dim in col_for:
-                items = [x for v in vals for x in v.split("|") if x != ""]
-                if items:
-                    clauses.append(f"{col_for[dim]} IN ({','.join(['?']*len(items))})")
-                    binds += items
+        if not key.startswith("filter_"):
+            continue
+        if key.endswith("_min"):
+            col = resolve_col(key[len("filter_"):-len("_min")])
+            if col:
+                clauses.append(f"TRY_CAST({col} AS DOUBLE) >= ?"); binds.append(float(vals[0]))
+        elif key.endswith("_max"):
+            col = resolve_col(key[len("filter_"):-len("_max")])
+            if col:
+                clauses.append(f"TRY_CAST({col} AS DOUBLE) <= ?"); binds.append(float(vals[0]))
+        else:
+            col = resolve_col(key[len("filter_"):])
+            items = [x for v in vals for x in v.split("|") if x != ""]
+            if col and items:
+                clauses.append(f"{col} IN ({','.join(['?']*len(items))})")
+                binds += items
     return clauses, binds

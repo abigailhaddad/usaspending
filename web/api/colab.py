@@ -42,7 +42,9 @@ def make_colab(code, title=None):
                  "Accept": "application/vnd.github+json",
                  "User-Agent": "usaspending-table-builder"})
     gist = json.loads(urllib.request.urlopen(req, timeout=30).read())
-    return f"https://colab.research.google.com/gist/{gist['id']}"
+    # Colab needs the owner in the path: /gist/<user>/<id>/<filename>
+    return (f"https://colab.research.google.com/gist/{gist['owner']['login']}/"
+            f"{gist['id']}/reproduce.ipynb")
 
 
 class handler(BaseHTTPRequestHandler):

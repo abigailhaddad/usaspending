@@ -85,17 +85,36 @@ def _inline(sql, binds):
     return out
 
 
+# Pinned package versions so the reproduction is deterministic (DuckDB ships Python,
+# R and CLI from the same release; 1.5.2 is current on PyPI and CRAN).
+DUCKDB_VERSION = "1.5.2"
+
+
 def reproduce(req):
-    """The exact SQL + a runnable Python snippet against the PUBLIC HF dataset."""
+    """The exact query against the PUBLIC HF dataset, in SQL, Python, and R — version-pinned."""
     sql, binds = build_sql(req)
     sql_hf = _inline(sql.format(src=hf_source(req["dataset"])), binds)
-    sql_pretty = sql_hf.replace(" FROM ", "\n  FROM ").replace(" WHERE ", "\n  WHERE ").replace(" GROUP BY ", "\n  GROUP BY ")
+    q = (sql_hf.replace(" FROM ", "\n  FROM ").replace(" WHERE ", "\n  WHERE ")
+               .replace(" GROUP BY ", "\n  GROUP BY "))
+
+    header = "Reproduce this exact result from the public USAspending dataset on HuggingFace."
+    sql_script = (
+        f"-- {header}\n-- DuckDB {DUCKDB_VERSION} — run in the DuckDB CLI or any DuckDB client.\n"
+        f"INSTALL httpfs; LOAD httpfs;\n{q};\n"
+    )
     python = (
-        "# Reproduce this exact result from the public USAspending dataset on HuggingFace.\n"
-        "# pip install duckdb\n"
+        f"# {header}\n# pip install duckdb=={DUCKDB_VERSION}\n"
         "import duckdb\n"
         "con = duckdb.connect()\n"
-        "con.execute(\"INSTALL httpfs; LOAD httpfs;\")\n"
-        f"print(con.execute('''\n{sql_pretty}\n''').df())\n"
+        'con.execute("INSTALL httpfs; LOAD httpfs;")\n'
+        f'con.sql(r"""\n{q}\n""").show()\n'
     )
-    return {"sql": sql_hf, "python": python}
+    r = (
+        f"# {header}\n"
+        f'# install.packages("duckdb")  # version {DUCKDB_VERSION}\n'
+        "library(duckdb)\n"
+        "con <- dbConnect(duckdb())\n"
+        'dbExecute(con, "INSTALL httpfs; LOAD httpfs;")\n'
+        f'print(dbGetQuery(con, r"(\n{q}\n)"))\n'
+    )
+    return {"sql": sql_script, "python": python, "r": r}

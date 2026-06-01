@@ -47,10 +47,13 @@
 </div>
 
 <script>
-const GREEN = "#2D6A4F", GOLD = "#D4A03C", PLUM = "#7A4E8C", CLAY = "#B5651D";
-const FONT = {family: "Source Sans 3, sans-serif", color: "#3D2B1F"};
+const GREEN = "#2D6A4F";                 // one bar color everywhere — calm + professional
+const GRID = "#ECE4D8";                  // barely-there gridlines on the cream bg
+const FONT = {family: "Source Sans 3, sans-serif", color: "#5A4D40", size: 12.5};
 const CLEAR = "rgba(0,0,0,0)";
-const baseLayout = extra => Object.assign({paper_bgcolor: CLEAR, plot_bgcolor: CLEAR, font: FONT}, extra);
+const baseLayout = extra => Object.assign(
+  {paper_bgcolor: CLEAR, plot_bgcolor: CLEAR, font: FONT, hoverlabel: {font: {family: "Source Sans 3"}}},
+  extra);
 const $ = id => document.getElementById(id);
 const ds = () => $("dataset").value;
 const B = v => v / 1e9;
@@ -60,13 +63,15 @@ async function agg(dim, top){
   const j = await (await fetch(u)).json();
   return (j.tables && j.tables[0]) ? j.tables[0].data.filter(r => r[0] != null && r[1] != null) : [];
 }
-function hbar(div, rows, color){
+function hbar(div, rows){
   rows = rows.slice().reverse();
-  Plotly.newPlot(div, [{type:"bar", orientation:"h", y: rows.map(r=>String(r[0])),
-    x: rows.map(r=>B(r[1])), marker:{color}, hovertemplate:"%{y}<br>$%{x:.2f}B<extra></extra>"}],
-    baseLayout({margin:{l:160,r:20,t:8,b:34}, height:320,
-      xaxis:{title:"$ billions", gridcolor:"#E8DDD0"},
-      yaxis:{automargin:true, ticklabelposition:"outside"}}),  // base margin + automargin so labels never clip
+  const lbl = s => { s = String(s); return s.length > 32 ? s.slice(0,31) + "…" : s; };
+  Plotly.newPlot(div, [{type:"bar", orientation:"h", y: rows.map(r=>lbl(r[0])),
+    customdata: rows.map(r=>String(r[0])),
+    x: rows.map(r=>B(r[1])), marker:{color:GREEN}, hovertemplate:"%{customdata}<br>$%{x:.2f}B<extra></extra>"}],
+    baseLayout({margin:{l:208,r:16,t:6,b:36}, height:320,  // fixed margin fits truncated labels (no automargin timing glitch)
+      xaxis:{title:"$ billions", gridcolor:GRID, zeroline:false, linecolor:GRID},
+      yaxis:{ticklabelposition:"outside"}}),
     {displayModeBar:false, responsive:true});
 }
 
@@ -75,19 +80,19 @@ async function draw(){
   const yr = (await agg("fiscal_year")).filter(r=>/^\d{4}$/.test(r[0])).sort((a,b)=>a[0].localeCompare(b[0]));
   Plotly.newPlot("byYear", [{type:"bar", x: yr.map(r=>r[0]), y: yr.map(r=>B(r[1])), marker:{color:GREEN},
     hovertemplate:"FY%{x}<br>$%{y:.2f}B<extra></extra>"}],
-    baseLayout({margin:{l:56,r:20,t:8,b:38}, height:300,
-      xaxis:{type:"category"},  // discrete years, not a 2,024.5 number axis
-      yaxis:{title:"$ billions", gridcolor:"#E8DDD0"}}),
+    baseLayout({margin:{l:56,r:16,t:6,b:36}, height:300,
+      xaxis:{type:"category", linecolor:GRID},  // discrete years, not a 2,024.5 number axis
+      yaxis:{title:"$ billions", gridcolor:GRID, zeroline:false}}),
     {displayModeBar:false, responsive:true});
 
-  hbar("byAgency", await agg("awarding_agency", 15), GREEN);
-  hbar("byRecipient", await agg("recipient", 15), GOLD);
-  hbar("byPsc", await agg("psc_desc", 15), PLUM);
+  hbar("byAgency", await agg("awarding_agency", 15));
+  hbar("byRecipient", await agg("recipient", 15));
+  hbar("byPsc", await agg("psc_desc", 15));
 
   const comp = await agg("extent_competed");
   const opts = await (await fetch(`/api/filter_options?field=extent_competed&dataset=${ds()}`)).json();
   const lab = {}; (opts.options||[]).forEach(o => lab[o.value] = o.label.replace(/ \(.*\)$/,""));
-  hbar("byCompete", comp.map(r => [lab[r[0]] || r[0], r[1]]).slice(0,12), CLAY);
+  hbar("byCompete", comp.map(r => [lab[r[0]] || r[0], r[1]]).slice(0,12));
 
   const st = (await agg("state")).filter(r => /^[A-Z]{2}$/.test(r[0]));
   Plotly.newPlot("byState", [{type:"choropleth", locationmode:"USA-states",

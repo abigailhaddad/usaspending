@@ -30,22 +30,58 @@ REFERENCE = [
 ]
 
 
+_AGENCY_NAMES = None
+
+
+def agency_names():
+    """toptier agency code -> name, from our published reference table (so we show names
+    not '003'). Read once from the public reference parquet on HuggingFace."""
+    global _AGENCY_NAMES
+    if _AGENCY_NAMES is None:
+        try:
+            import duckdb
+            con = duckdb.connect()
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+            rows = con.execute(
+                f"SELECT toptier_code, agency_name FROM read_parquet('{RESOLVE}reference/toptier_agencies.parquet')"
+            ).fetchall()
+            con.close()
+            _AGENCY_NAMES = {c: nm for c, nm in rows if c}
+        except Exception:
+            _AGENCY_NAMES = {}
+    return _AGENCY_NAMES
+
+
 def build_index():
     manifest = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
-    groups = defaultdict(lambda: {"files": 0, "rows": 0, "bytes": 0})
+    names = agency_names()
+    years = defaultdict(lambda: {"rows": 0})
+    by_agency = defaultdict(lambda: defaultdict(list))  # dataset -> code -> [{fy,rows,url}]
     for logical_id, e in manifest.items():
-        product, fy, _ = logical_id.split("/")
-        g = groups[(product, fy)]
-        g["files"] += 1
-        g["rows"] += e.get("rows", 0) or 0
-        g["bytes"] += e.get("parquet_bytes", 0) or 0
-    # newest fiscal year first, contracts before assistance
-    spending = [{"dataset": p, "fiscal_year": fy, "files": v["files"],
-                 "rows": v["rows"], "bytes": v["bytes"], "browse": f"{TREE}{p}/fiscal_year={fy}"}
-                for (p, fy), v in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1]), reverse=True)]
+        product, fy, code = logical_id.split("/")
+        rows = e.get("rows", 0) or 0
+        years[(product, fy)]["rows"] += rows
+        if rows > 0:  # skip empty per-agency files (archive emits one per agency-year even w/ no awards)
+            by_agency[product][code].append(
+                {"fiscal_year": fy, "rows": rows, "url": RESOLVE + e["parquet_key"]})
+
+    # one clean file per (dataset, fiscal year) — the serving layer, direct download
+    serve = [{"dataset": p, "fiscal_year": fy, "rows": v["rows"],
+              "url": f"{RESOLVE}serve/{p}/{fy}.parquet"}
+             for (p, fy), v in sorted(years.items(), key=lambda kv: (kv[0][0], kv[0][1]), reverse=True)]
+
+    # per-agency files, grouped + named, newest year first
+    agencies = {}
+    for product, codes in by_agency.items():
+        agencies[product] = sorted(
+            [{"code": c, "name": names.get(c, c),
+              "files": sorted(fs, key=lambda x: x["fiscal_year"], reverse=True)}
+             for c, fs in codes.items()],
+            key=lambda a: a["name"])
+
     reference = [{"name": n, "desc": d, "url": f"{RESOLVE}reference/{n}.parquet"} for n, d in REFERENCE]
     return {"hf_dataset": f"https://huggingface.co/datasets/{HF_REPO}",
-            "spending": spending, "reference": reference}
+            "serve": serve, "agencies": agencies, "reference": reference}
 
 
 class handler(BaseHTTPRequestHandler):

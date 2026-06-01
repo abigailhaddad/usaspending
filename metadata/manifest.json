@@ -9463,6 +9463,78 @@
     "rows": 0,
     "updated_at": "2026-06-01T16:47:15.157044+00:00"
   },
+  "assistance/2024/096": {
+    "datestamp": "20260506",
+    "etag": "e6c1a2a8ec27da10fa622d45c3df37f5",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2024/agency=096/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "assistance/2024/097": {
+    "datestamp": "20260506",
+    "etag": "8aadacfbf95afa73ed52c8569a7f64b1",
+    "parquet_bytes": 3659132,
+    "parquet_key": "assistance/fiscal_year=2024/agency=097/part.parquet",
+    "rows": 27105,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "assistance/2024/1100": {
+    "datestamp": "20260506",
+    "etag": "24428e51f6b4ba2722ea8326ba2d9053",
+    "parquet_bytes": 121975,
+    "parquet_key": "assistance/fiscal_year=2024/agency=1100/part.parquet",
+    "rows": 857,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "assistance/2024/1125": {
+    "datestamp": "20260506",
+    "etag": "a4b8c224df7c0ee57929bdbed1f30192",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2024/agency=1125/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "assistance/2024/1133": {
+    "datestamp": "20260506",
+    "etag": "fa8d5700dde54a01522e5a44423a35bd",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2024/agency=1133/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "assistance/2024/1601": {
+    "datestamp": "20260506",
+    "etag": "de46398d3a0dfea22b6e9bdfb24b378f",
+    "parquet_bytes": 1996600,
+    "parquet_key": "assistance/fiscal_year=2024/agency=1601/part.parquet",
+    "rows": 8863,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "assistance/2024/1602": {
+    "datestamp": "20260506",
+    "etag": "b8b5c6775464567fb144610f80a1863c",
+    "parquet_bytes": 60890,
+    "parquet_key": "assistance/fiscal_year=2024/agency=1602/part.parquet",
+    "rows": 386,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "assistance/2024/164": {
+    "datestamp": "20260506",
+    "etag": "8596a74e50d71ebd928882a6f75b2d2c",
+    "parquet_bytes": 122124,
+    "parquet_key": "assistance/fiscal_year=2024/agency=164/part.parquet",
+    "rows": 126,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "assistance/2024/166": {
+    "datestamp": "20260506",
+    "etag": "b7c353165bdffcb9d0ed350054b69f5b",
+    "parquet_bytes": 4660,
+    "parquet_key": "assistance/fiscal_year=2024/agency=166/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
   "assistance/2025/003": {
     "datestamp": "20260506",
     "etag": "dc226ccf5dc43ad55c7c21cf0390a040",
@@ -20790,6 +20862,70 @@
     "parquet_key": "contracts/fiscal_year=2024/agency=093/part.parquet",
     "rows": 112,
     "updated_at": "2026-06-01T16:47:15.157044+00:00"
+  },
+  "contracts/2024/096": {
+    "datestamp": "20260506",
+    "etag": "2c691ea07e77a10309263c266583baf0",
+    "parquet_bytes": 12010,
+    "parquet_key": "contracts/fiscal_year=2024/agency=096/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "contracts/2024/097": {
+    "datestamp": "20260506",
+    "etag": "9d506304f8e36e8fa1adb0a911ff6ad8-131",
+    "parquet_bytes": 673891488,
+    "parquet_key": "contracts/fiscal_year=2024/agency=097/part.parquet",
+    "rows": 4419665,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "contracts/2024/1100": {
+    "datestamp": "20260506",
+    "etag": "4b0bdcc1f87fbe442273dfed6e54509d",
+    "parquet_bytes": 208349,
+    "parquet_key": "contracts/fiscal_year=2024/agency=1100/part.parquet",
+    "rows": 634,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "contracts/2024/1125": {
+    "datestamp": "20260506",
+    "etag": "aa53ae7aae3c39c053e884f9da3b11cd",
+    "parquet_bytes": 197145,
+    "parquet_key": "contracts/fiscal_year=2024/agency=1125/part.parquet",
+    "rows": 497,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "contracts/2024/1133": {
+    "datestamp": "20260506",
+    "etag": "1a5051cd86bb8fa16e6a194de9bba59c",
+    "parquet_bytes": 133275,
+    "parquet_key": "contracts/fiscal_year=2024/agency=1133/part.parquet",
+    "rows": 227,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "contracts/2024/1601": {
+    "datestamp": "20260506",
+    "etag": "2abfa4798d5569d8b5f53b4173f90e92",
+    "parquet_bytes": 1233027,
+    "parquet_key": "contracts/fiscal_year=2024/agency=1601/part.parquet",
+    "rows": 5879,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "contracts/2024/1602": {
+    "datestamp": "20260506",
+    "etag": "219f5652be154a2828573af82eaa18c3",
+    "parquet_bytes": 228941,
+    "parquet_key": "contracts/fiscal_year=2024/agency=1602/part.parquet",
+    "rows": 762,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
+  },
+  "contracts/2024/164": {
+    "datestamp": "20260506",
+    "etag": "9a34d99616ca52060bbf82f9968190d3",
+    "parquet_bytes": 12010,
+    "parquet_key": "contracts/fiscal_year=2024/agency=164/part.parquet",
+    "rows": 0,
+    "updated_at": "2026-06-01T16:50:32.389551+00:00"
   },
   "contracts/2024/389": {
     "datestamp": "20260506",

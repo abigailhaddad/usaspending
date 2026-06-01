@@ -141,6 +141,31 @@ Built:
 - Refresh reference tables on the same cron.
 - **Deliverable:** hands-off weekly updates; manifest is the source of truth.
 
+## Phase 4.5 — Serving / transform layer (runs after backfill) — planned 2026-06-01
+
+The raw per-agency files (what the backfill produces) are great for ETag incremental
+refresh but weak for queries: ~4,520 tiny files over hf://, transaction-level, 297 cols.
+After backfill completes, add a transform pass producing the query-optimized serving layer.
+User-value ranking (decided with user):
+
+1. **Award-summary table** — derive one row per award (latest/aggregated values) from the
+   transaction rows. The biggest usability unlock; what most analysts actually want.
+2. **Per-year serving layer** — compact per-agency → ~40 per-year files (agency as a sorted
+   column). ~100× fewer file opens for cross-agency/analytics queries; well-sized files.
+   Sort rows within files (recipient / action_date) for row-group pruning — free, do always.
+3. **Data-dictionary-driven metadata (force multiplier).** The snapshot has 457 documented
+   columns, **289 coded fields** w/ value→label maps, **12 groupings**. Use it to:
+   - emit a **codebook** reference table (value→label for the 289 coded columns);
+   - embed each column's Definition as Parquet column metadata + a grouped column reference
+     in the dataset card (self-documenting);
+   - drive the BI site (group columns by the 12 groupings, hover-definitions, code decoding);
+   - make `schema.py` typing dictionary-driven instead of name-heuristic.
+
+Lower priority / subsumed: separate core+full column tiers (the award-summary table is
+effectively the clean narrow table; dictionary groupings already enable column-picking).
+
+Raw-layer fate (keep on HF vs serving-only): **decided after backfill.**
+
 ## Phase 5 — Vercel BI site (richer aggregation layer)
 
 **Goal:** usajobs_historical-style filter/table UI, **but with a much deeper aggregation

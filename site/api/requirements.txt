@@ -1,0 +1,5 @@
+duckdb>=1.0
+requests
+huggingface_hub
+boto3
+pyarrow

@@ -51,7 +51,7 @@ export default function Downloads() {
 
       <div className="flex items-center gap-3">
         <span className="text-sm font-medium">Dataset</span>
-        <Select value={dataset} onValueChange={(v) => { setDataset(v); setOpen(null); }}>
+        <Select value={dataset} onValueChange={(v) => { setDataset(v ?? ""); setOpen(null); }}>
           <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
           <SelectContent>{DATASETS.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}</SelectContent>
         </Select>

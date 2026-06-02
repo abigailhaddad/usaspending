@@ -115,7 +115,7 @@ function Panel({
                 <XAxis type="number" tickFormatter={(v) => `$${v}B`} fontSize={12} stroke="#888" />
                 <YAxis type="category" dataKey="label" width={240} fontSize={12} stroke="#555" interval={0}
                   tickFormatter={(v: string) => (v.length > 38 ? v.slice(0, 37) + "…" : v)} />
-                <Tooltip formatter={(v: number) => money(v)} labelFormatter={(l) => String(l)} cursor={{ fill: "rgba(45,106,79,0.06)" }} />
+                <Tooltip formatter={(v) => money(v as number)} labelFormatter={(l) => String(l)} cursor={{ fill: "rgba(45,106,79,0.06)" }} />
                 <Bar dataKey="value" fill={GREEN} radius={[0, 3, 3, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -125,7 +125,7 @@ function Panel({
                 <CartesianGrid vertical={false} stroke="#eee" />
                 <XAxis dataKey="label" fontSize={12} stroke="#888" />
                 <YAxis tickFormatter={(v) => `$${v}B`} fontSize={12} stroke="#888" />
-                <Tooltip formatter={(v: number) => money(v)} cursor={{ fill: "rgba(45,106,79,0.06)" }} />
+                <Tooltip formatter={(v) => money(v as number)} cursor={{ fill: "rgba(45,106,79,0.06)" }} />
                 <Bar dataKey="value" fill={GREEN} radius={[3, 3, 0, 0]}>{data.map((_, i) => <Cell key={i} />)}</Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -239,7 +239,7 @@ export default function Explorer() {
       <Card className="sticky top-[57px] z-10">
         <CardContent className="space-y-3 py-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={dataset} onValueChange={setDataset}>
+            <Select value={dataset} onValueChange={(v) => setDataset(v ?? "")}>
               <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
               <SelectContent>{DATASETS.map((d) => <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>)}</SelectContent>
             </Select>

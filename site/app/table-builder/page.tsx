@@ -184,7 +184,7 @@ export default function TableBuilder() {
       <Step n={2} title="Select a timeframe" hint="Leave blank for all time. Tip: group by “Month” in step 3 to see every month in the range.">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm font-medium">Filter</span>
-          <Select value={dateField} onValueChange={setDateField}>
+          <Select value={dateField} onValueChange={(v) => setDateField(v ?? "")}>
             <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
             <SelectContent>{Object.entries(DATE_FIELDS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
           </Select>
@@ -218,7 +218,7 @@ export default function TableBuilder() {
         <div className="space-y-3">
           {filters.map((f) => (
             <div key={f.id} className="space-y-1.5 rounded-md border p-2">
-              <Select value={f.field} onValueChange={(v) => changeFilterField(f.id, v)}>
+              <Select value={f.field} onValueChange={(v) => changeFilterField(f.id, v ?? "")}>
                 <SelectTrigger className="h-8 w-full text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>{Object.entries(FILTER_FIELDS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
               </Select>

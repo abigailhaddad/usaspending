@@ -451,9 +451,10 @@ export function Explorer({ dataset }: { dataset: string }) {
           {dim("recipient") && (
             <Section
               q="Who receives the money?"
-              intro={`A relatively small number of large organizations account for much of federal ${noun} spending. These are the top recipients.`}
+              intro={`A relatively small number of large organizations account for much of federal ${noun} spending. "Recipient" is the specific entity on the award; "recipient parent" rolls subsidiaries up to the corporate family (via SAM.gov parent UEI) — e.g. Lockheed's units combined.`}
             >
               <Breakdown title="Top recipients" dimKey="recipient" allDim={dim("recipient")!} dataset={dataset} agencies={agencies} years={data.years} />
+              {dim("recipient_parent") && <Breakdown title="Top recipient parents (corporate families)" dimKey="recipient_parent" allDim={dim("recipient_parent")!} dataset={dataset} agencies={agencies} years={data.years} />}
             </Section>
           )}
 

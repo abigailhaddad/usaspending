@@ -31,6 +31,7 @@ DIMS = {
         "awarding_agency":    ("Awarding agency",       "awarding_agency_name",        False),
         "awarding_subagency": ("Awarding sub-agency",    "awarding_sub_agency_name",    False),
         "recipient":          ("Recipient",              "recipient_name",              False),
+        "recipient_parent":   ("Recipient parent",       "recipient_parent_name",       False),
         "state":              ("Recipient state",        "recipient_state_code",        True),
         "naics":              ("Industry (NAICS)",       "naics_description",           False),
         "psc":                ("Product/service (PSC)",  "product_or_service_code_description", False),
@@ -42,6 +43,7 @@ DIMS = {
         "awarding_agency":    ("Awarding agency",        "awarding_agency_name",        False),
         "awarding_subagency": ("Awarding sub-agency",    "awarding_sub_agency_name",    False),
         "recipient":          ("Recipient",              "recipient_name",              False),
+        "recipient_parent":   ("Recipient parent",       "recipient_parent_name",       False),
         "state":              ("Recipient state",        "recipient_state_code",        True),
         "assistance_type":    ("Assistance type",        "assistance_type_code",        True),
         "cfda":               ("CFDA program",           "cfda_number",                 False),
@@ -178,8 +180,8 @@ def build_filters(dataset, con):
 import re
 
 # dims that get a per-agency breakdown (skip the agency dims themselves — trivial within one agency)
-AGENCY_BREAKDOWN_DIMS = ("recipient", "state", "naics", "psc", "competition", "set_aside",
-                         "assistance_type", "cfda", "business_size")
+AGENCY_BREAKDOWN_DIMS = ("recipient", "recipient_parent", "state", "naics", "psc", "competition",
+                         "set_aside", "assistance_type", "cfda", "business_size")
 
 
 def _slug(name):

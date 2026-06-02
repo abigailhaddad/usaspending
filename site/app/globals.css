@@ -132,7 +132,7 @@
 /* ---------------------------------------------------------------------------
    USWDS look (U.S. Web Design System component styling), green primary.
    Applied as an unlayered layer keyed on shadcn data-slots so it wins over
-   Tailwind utilities without touching page markup. Values mirror @uswds/uswds
+   Tailwind utilities without touching page markup. Values mirror the U.S. Web Design System
    (Public Sans, squared corners, dark 1px borders, thick focus outline, bold
    labels, ruled/striped tables, usa-tag) — but the accent stays our green.
    --------------------------------------------------------------------------- */

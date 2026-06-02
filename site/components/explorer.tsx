@@ -122,44 +122,53 @@ function SpendingOverTime({ data }: { data: Data }) {
   const agencyNames = useMemo(() => Array.from(new Set(ts.map((r) => r.agency))).sort(), [ts]);
   const f = fmt(metric);
   const yrs = useMemo(() => data.years.filter((y) => y >= from && y <= to), [data.years, from, to]);
-  const { chartData, series } = useMemo(() => {
+  const { chartData, series, allItems } = useMemo(() => {
     const val = (r: TS) => (metric === "obl" ? r.obl : r.txn);
     const inRange = (r: TS) => r.fy >= from && r.fy <= to && (!agency || r.agency === agency);
     if (by === "none") {
       const acc: Record<string, number> = {};
       for (const r of ts) if (inRange(r)) acc[r.fy] = (acc[r.fy] || 0) + val(r);
       const chartData: Record<string, string | number>[] = yrs.map((y) => ({ fy: y, Total: acc[y] || 0 }));
-      return { chartData, series: ["Total"] };
+      return { chartData, series: ["Total"], allItems: [] as { key: string; total: number; byYear: Record<string, number> }[] };
     }
     const keyOf = (r: TS) => (by === "agency" ? r.agency : r.sub);
+    // full grid: every item × year (the table shows all of these; the chart only the top 8)
+    const byKey: Record<string, Record<string, number>> = {};
     const totals: Record<string, number> = {};
-    for (const r of ts) if (inRange(r)) totals[keyOf(r)] = (totals[keyOf(r)] || 0) + val(r);
-    const top = Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, 8).map((e) => e[0]);
-    const topSet = new Set(top);
-    const grid: Record<string, Record<string, number>> = {};
     for (const r of ts) {
       if (!inRange(r)) continue;
-      const k = keyOf(r); if (!topSet.has(k)) continue;
-      (grid[r.fy] ||= {})[k] = (grid[r.fy]?.[k] || 0) + val(r);
+      const k = keyOf(r);
+      (byKey[k] ||= {})[r.fy] = (byKey[k][r.fy] || 0) + val(r);
+      totals[k] = (totals[k] || 0) + val(r);
     }
+    const sortedKeys = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
+    const top = sortedKeys.slice(0, 8);
     const chartData = yrs.map((y) => {
       const row: Record<string, string | number> = { fy: y };
-      for (const k of top) row[k] = grid[y]?.[k] || 0;
+      for (const k of top) row[k] = byKey[k]?.[y] || 0;
       return row;
     });
-    return { chartData, series: top };
+    const allItems = sortedKeys.map((k) => ({ key: k, total: totals[k], byYear: byKey[k] }));
+    return { chartData, series: top, allItems };
   }, [ts, yrs, from, to, metric, by, agency]);
-  const byLabel = by === "agency" ? ", by agency (top 8)" : by === "sub" ? ", by sub-agency (top 8)" : "";
+  const chartTitle = by === "none" ? `${metricLabel(metric)} over time`
+    : by === "agency" ? `${metricLabel(metric)} by agency` : `${metricLabel(metric)} by sub-agency`;
   return (
     <Card>
       <CardHeader className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="text-base">{metricLabel(metric)} over time{byLabel}</CardTitle>
+          <div>
+            <CardTitle className="text-base">{chartTitle}</CardTitle>
+            {by !== "none" && <div className="text-xs text-muted-foreground">FY{from}–{to} · all {allItems.length} {by === "agency" ? "agencies" : "sub-agencies"}</div>}
+          </div>
           <div className="flex items-center gap-2">
             <Toggle value={metric} onChange={setMetric} opts={[{ v: "obl", label: "Obligations" }, { v: "txn", label: "Transactions" }]} />
             <Toggle value={asTable ? "t" : "c"} onChange={(v) => setAsTable(v === "t")} opts={[{ v: "c", label: "Graph" }, { v: "t", label: "Table" }]} />
             <Button size="sm" variant="outline" onClick={() => downloadCSV(
-              [["fiscal_year", ...series], ...chartData.map((d) => [d.fy as string, ...series.map((s) => (d[s] as number) ?? 0)])],
+              by === "none"
+                ? [["fiscal_year", metric], ...chartData.map((d) => [d.fy as string, (d.Total as number) ?? 0])]
+                : [[by === "agency" ? "agency" : "sub_agency", ...yrs, "total"],
+                   ...allItems.map((it) => [it.key, ...yrs.map((y) => it.byYear[y] || 0), it.total])],
               "spending_over_time.csv")}>Export</Button>
           </div>
         </div>
@@ -194,37 +203,71 @@ function SpendingOverTime({ data }: { data: Data }) {
       </CardHeader>
       <CardContent>
         {asTable ? (
-          <div className="max-h-[400px] overflow-auto rounded border">
+          <div className="max-h-[460px] overflow-auto rounded border">
             <Table>
-              <TableHeader className="sticky top-0 bg-muted"><TableRow>
-                <TableHead>Fiscal year</TableHead>
-                {series.map((s) => <TableHead key={s} className="text-right">{s}</TableHead>)}
-              </TableRow></TableHeader>
-              <TableBody>{chartData.map((d) => (
-                <TableRow key={d.fy as string}>
-                  <TableCell className="font-medium">{d.fy}</TableCell>
-                  {series.map((s) => <TableCell key={s} className="text-right tabular-nums">{f((d[s] as number) || 0)}</TableCell>)}
-                </TableRow>
-              ))}</TableBody>
+              {by === "none" ? (
+                <>
+                  <TableHeader className="sticky top-0 bg-muted"><TableRow>
+                    <TableHead>Fiscal year</TableHead><TableHead className="text-right">{metricLabel(metric)}</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>{chartData.map((d) => (
+                    <TableRow key={d.fy as string}>
+                      <TableCell className="font-medium">{d.fy}</TableCell>
+                      <TableCell className="text-right tabular-nums">{f((d.Total as number) || 0)}</TableCell>
+                    </TableRow>
+                  ))}</TableBody>
+                </>
+              ) : (
+                // every item is a ROW (all of them); years across, total last
+                <>
+                  <TableHeader className="sticky top-0 bg-muted"><TableRow>
+                    <TableHead>{by === "agency" ? "Agency" : "Sub-agency"}</TableHead>
+                    {yrs.map((y) => <TableHead key={y} className="text-right">{y}</TableHead>)}
+                    <TableHead className="text-right font-semibold">Total</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>{allItems.map((it) => (
+                    <TableRow key={it.key}>
+                      <TableCell className="whitespace-nowrap font-medium">{it.key}</TableCell>
+                      {yrs.map((y) => <TableCell key={y} className="text-right tabular-nums">{f(it.byYear[y] || 0)}</TableCell>)}
+                      <TableCell className="text-right font-semibold tabular-nums">{f(it.total)}</TableCell>
+                    </TableRow>
+                  ))}</TableBody>
+                </>
+              )}
             </Table>
           </div>
-        ) : (
-          <ResponsiveContainer width="100%" height={by === "none" ? 320 : 400}>
+        ) : by === "none" ? (
+          <ResponsiveContainer width="100%" height={320}>
             <LineChart data={chartData} margin={{ left: 12, right: 16, top: 4, bottom: 4 }}>
               <CartesianGrid stroke="#eee" />
               <XAxis dataKey="fy" fontSize={12} stroke="#888" />
               <YAxis tickFormatter={(v) => f(v as number)} fontSize={12} stroke="#888" width={70} />
               <Tooltip formatter={(v) => f(v as number)} />
-              {by !== "none" && <Legend wrapperStyle={{ fontSize: 11 }} />}
-              {series.map((s, i) => (
-                <Line key={s} type="monotone" dataKey={s} stroke={SERIES_COLORS[i % SERIES_COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />
-              ))}
+              <Line type="monotone" dataKey="Total" stroke={GREEN} strokeWidth={2} dot={{ r: 2 }} />
             </LineChart>
           </ResponsiveContainer>
+        ) : (
+          // every item as a bar — all of them, sorted; scroll to see the long tail (OPM style)
+          <div className="max-h-[540px] overflow-y-auto pr-1">
+            <ResponsiveContainer width="100%" height={Math.max(260, allItems.length * 24)}>
+              <BarChart data={allItems.map((it) => ({ label: it.key, value: it.total }))} layout="vertical" margin={{ left: 8, right: 90, top: 4, bottom: 4 }}>
+                <CartesianGrid horizontal={false} stroke="#eee" />
+                <XAxis type="number" tickFormatter={(v) => f(v as number)} fontSize={11} stroke="#888" />
+                <YAxis type="category" dataKey="label" width={240} fontSize={11} stroke="#555" interval={0}
+                  tickFormatter={(v: string) => (v.length > 38 ? v.slice(0, 37) + "…" : v)} />
+                <Tooltip formatter={(v) => f(v as number)} labelFormatter={(l) => String(l)} cursor={{ fill: "rgba(45,106,79,0.06)" }} />
+                <Bar dataKey="value" fill={GREEN} radius={[0, 2, 2, 0]}>
+                  <LabelList dataKey="value" position="right" formatter={(v) => f(Number(v))} fontSize={10} fill="#555" />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         )}
-        <p className="mt-2 text-xs text-muted-foreground">
-          FY{data.years[data.years.length - 1]} is a partial year (still in progress) — the most recent point is incomplete and will keep rising.
-        </p>
+        {by === "none" && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            FY{data.years[data.years.length - 1]} is a partial year (still in progress) — the most recent point is incomplete and will keep rising.
+          </p>
+        )}
       </CardContent>
     </Card>
   );

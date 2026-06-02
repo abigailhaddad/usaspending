@@ -180,8 +180,8 @@ export default function TableBuilder() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Table Builder</h1>
         <p className="mt-1 text-muted-foreground">
-          Build custom tables of federal spending — pick a timeframe, group by any fields,
-          aggregate, and get the exact code to reproduce every number.
+          Compose a query of federal spending — pick a timeframe, group by any fields, add filters —
+          and get ready-to-run code (Python / Colab) that produces the table from the full published dataset.
         </p>
       </div>
 

@@ -318,10 +318,14 @@ function StateMap({ valueByName, metric }: { valueByName: Record<string, number>
   );
 }
 
-function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, geo, range }: {
-  title: string; dimKey: string; allDim: Dim; dataset: string; agencies: Agency[];
+function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, geo, range, groups }: {
+  title: string; dimKey?: string; allDim?: Dim; dataset: string; agencies: Agency[];
   years: string[]; labelMap?: Record<string, string>; geo?: boolean; range?: boolean;
+  groups?: { dimKey: string; allDim: Dim; label: string }[];
 }) {
+  const [groupIdx, setGroupIdx] = useState(0);          // which "group by" option (when groups given)
+  const aDimKey = groups ? groups[groupIdx].dimKey : dimKey!;
+  const aAllDim = groups ? groups[groupIdx].allDim : allDim!;
   const [agency, setAgency] = useState(""); // agency slug; "" = all agencies
   const [agencyDim, setAgencyDim] = useState<Dim | null>(null);
   const [loading, setLoading] = useState(false);
@@ -334,13 +338,13 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
   useEffect(() => {
     if (!agency) { setAgencyDim(null); return; }
     let on = true; setLoading(true);
-    getAgencyData(dataset, agency).then((d) => { if (on) { setAgencyDim(d?.dims?.[dimKey] ?? null); setLoading(false); } });
+    getAgencyData(dataset, agency).then((d) => { if (on) { setAgencyDim(d?.dims?.[aDimKey] ?? null); setLoading(false); } });
     return () => { on = false; };
-  }, [agency, dataset, dimKey]);
+  }, [agency, dataset, aDimKey]);
 
   const agencyName = agencies.find((a) => a.slug === agency)?.name || "";
-  const dim = agency ? agencyDim : allDim;
-  const label = dim?.label ?? allDim.label;
+  const dim = agency ? agencyDim : aAllDim;
+  const label = dim?.label ?? aAllDim.label;
   const disp = (v: string) => (labelMap && labelMap[v]) || v;
   // bounded/categorical dims sum EXACTLY across a year range (complete per-year values);
   // top-N dims use a single year or all-years (an exact multi-year range isn't possible).
@@ -385,6 +389,13 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
         </div>
         {/* OPM-style labeled control row */}
         <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+          {groups && groups.length > 1 && (
+            <div>
+              <div className="mb-1 text-sm font-medium">Group by</div>
+              <Toggle value={String(groupIdx)} onChange={(v) => setGroupIdx(Number(v))}
+                opts={groups.map((g, i) => ({ v: String(i), label: g.label }))} />
+            </div>
+          )}
           <Typeahead label="Agency" value={agencyName} options={agencies.map((a) => a.name)}
             onChange={(name) => setAgency(name ? (agencies.find((a) => a.name === name)?.slug || "") : "")} allLabel="All agencies" />
           <div>
@@ -536,10 +547,13 @@ export function Explorer({ dataset }: { dataset: string }) {
           {dim("recipient") && (
             <Section
               q="Who receives the money?"
-              intro={`A relatively small number of large organizations account for much of federal ${noun} spending. "Recipient" is the specific entity on the award; "recipient parent" rolls subsidiaries up to the corporate family (via SAM.gov parent UEI) — e.g. Lockheed's units combined.`}
+              intro={`A relatively small number of large organizations account for much of federal ${noun} spending. Group by "Recipient" for the specific entity on each award, or "Parent company" to roll subsidiaries and name variants up to the corporate family (via SAM.gov parent UEI) — e.g. Lockheed's units combined.`}
             >
-              <Breakdown title="Top recipients" dimKey="recipient" allDim={dim("recipient")!} dataset={dataset} agencies={agencies} years={data.years} />
-              {dim("recipient_parent") && <Breakdown title="Top recipient parents (corporate families)" dimKey="recipient_parent" allDim={dim("recipient_parent")!} dataset={dataset} agencies={agencies} years={data.years} />}
+              <Breakdown title="Largest recipients" dataset={dataset} agencies={agencies} years={data.years}
+                groups={[
+                  { dimKey: "recipient", allDim: dim("recipient")!, label: "Recipient" },
+                  ...(dim("recipient_parent") ? [{ dimKey: "recipient_parent", allDim: dim("recipient_parent")!, label: "Parent company" }] : []),
+                ]} />
             </Section>
           )}
 

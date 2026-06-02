@@ -15,6 +15,7 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { ComposableMap, Geographies, Geography } from "react-simple-maps";
 
 const GREEN = "#2d6a4f";
 const SERIES_COLORS = ["#2d6a4f", "#40916c", "#74c69d", "#1b4332", "#52796f", "#95d5b2", "#b08968", "#9c6644"];
@@ -240,16 +241,45 @@ function getAgencyData(dataset: string, slug: string): Promise<Data | null> {
   return agencyCache[k];
 }
 
-function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap }: {
+// US choropleth: states colored by value (full state list, not just top N).
+function StateMap({ valueByName, metric }: { valueByName: Record<string, number>; metric: Metric }) {
+  const [hover, setHover] = useState<{ name: string; value: number } | null>(null);
+  const max = Math.max(1, ...Object.values(valueByName));
+  const f = fmt(metric);
+  const fill = (v: number) => (v ? `rgba(45,106,79,${(0.12 + 0.88 * Math.sqrt(v / max)).toFixed(3)})` : "#eef0f0");
+  return (
+    <div className="relative">
+      <ComposableMap projection="geoAlbersUsa" width={900} height={500} style={{ width: "100%", height: "auto" }}>
+        <Geographies geography="/us-states-10m.json">
+          {({ geographies }: { geographies: { rsmKey: string; properties: { name: string } }[] }) =>
+            geographies.map((geo) => {
+              const v = valueByName[geo.properties.name] || 0;
+              return (
+                <Geography key={geo.rsmKey} geography={geo} fill={fill(v)} stroke="#fff" strokeWidth={0.5}
+                  onMouseEnter={() => setHover({ name: geo.properties.name, value: v })}
+                  onMouseLeave={() => setHover(null)}
+                  style={{ default: { outline: "none" }, hover: { outline: "none", fill: GREEN }, pressed: { outline: "none" } }} />
+              );
+            })}
+        </Geographies>
+      </ComposableMap>
+      <div className="absolute left-2 top-2 rounded border bg-background/90 px-2 py-1 text-sm shadow-sm">
+        {hover ? <><span className="font-medium">{hover.name}</span>: {f(hover.value)}</> : <span className="text-muted-foreground">Hover a state</span>}
+      </div>
+    </div>
+  );
+}
+
+function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, geo }: {
   title: string; dimKey: string; allDim: Dim; dataset: string; agencies: Agency[];
-  years: string[]; labelMap?: Record<string, string>;
+  years: string[]; labelMap?: Record<string, string>; geo?: boolean;
 }) {
   const [agency, setAgency] = useState(""); // agency slug; "" = all agencies
   const [agencyDim, setAgencyDim] = useState<Dim | null>(null);
   const [loading, setLoading] = useState(false);
   const [period, setPeriod] = useState("all");
   const [metric, setMetric] = useState<Metric>("obl");
-  const [asTable, setAsTable] = useState(false);
+  const [view, setView] = useState<"chart" | "map" | "table">("chart");
 
   useEffect(() => {
     if (!agency) { setAgencyDim(null); return; }
@@ -263,7 +293,12 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap }
   const label = dim?.label ?? allDim.label;
   const disp = (v: string) => (labelMap && labelMap[v]) || v;
   const full = dim?.periods[period] || [];
-  const truncated = full.length > TOP_N;
+  const truncated = full.length > TOP_N && view !== "map";
+  const valueByName = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const i of full) m[disp(i.label)] = metric === "obl" ? i.obl : i.txn;
+    return m;
+  }, [dim, period, metric, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
   const items = useMemo(() => {
     const r = full.slice();
     r.sort((a, b) => (metric === "obl" ? b.obl - a.obl : b.txn - a.txn));
@@ -292,7 +327,9 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap }
               </SelectContent>
             </Select>
             <Toggle value={metric} onChange={setMetric} opts={[{ v: "obl", label: "$" }, { v: "txn", label: "#" }]} />
-            <Toggle value={asTable ? "t" : "c"} onChange={(v) => setAsTable(v === "t")} opts={[{ v: "c", label: "Graph" }, { v: "t", label: "Table" }]} />
+            <Toggle value={view} onChange={setView} opts={geo
+              ? [{ v: "chart" as const, label: "Bars" }, { v: "map" as const, label: "Map" }, { v: "table" as const, label: "Table" }]
+              : [{ v: "chart" as const, label: "Graph" }, { v: "table" as const, label: "Table" }]} />
             <Button size="sm" variant="outline" onClick={() => downloadCSV(
               [[label, metric], ...items.map((r) => [r.label, r.value])], `${title.replace(/\W+/g, "_")}.csv`)}>Export</Button>
           </div>
@@ -305,7 +342,9 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap }
       <CardContent>
         {loading ? <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">loading {agencyName}…</div>
           : items.length === 0 ? <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">no data{agencyName ? ` for ${agencyName}` : ""}</div>
-          : asTable ? (
+          : view === "map" ? (
+            <StateMap valueByName={valueByName} metric={metric} />
+          ) : view === "table" ? (
             <div className="max-h-[420px] overflow-auto rounded border">
               <Table>
                 <TableHeader className="sticky top-0 bg-muted"><TableRow><TableHead>{label}</TableHead><TableHead className="text-right">{metricLabel(metric)}</TableHead></TableRow></TableHeader>
@@ -428,7 +467,7 @@ export function Explorer({ dataset }: { dataset: string }) {
             {dim("psc") && <Breakdown title="Top products & services (PSC)" dimKey="psc" allDim={dim("psc")!} dataset={dataset} agencies={agencies} years={data.years} />}
             {dim("cfda") && <Breakdown title="Top programs (CFDA)" dimKey="cfda" allDim={dim("cfda")!} dataset={dataset} agencies={agencies} years={data.years} />}
             {dim("assistance_type") && <Breakdown title="Assistance type" dimKey="assistance_type" allDim={dim("assistance_type")!} dataset={dataset} agencies={agencies} years={data.years} />}
-            {dim("state") && <Breakdown title="By recipient state" dimKey="state" allDim={dim("state")!} dataset={dataset} agencies={agencies} years={data.years} labelMap={STATE_NAMES} />}
+            {dim("state") && <Breakdown title="By recipient state" dimKey="state" allDim={dim("state")!} dataset={dataset} agencies={agencies} years={data.years} labelMap={STATE_NAMES} geo />}
           </Section>
 
           {(dim("competition") || dim("set_aside") || dim("business_size")) && (

@@ -32,7 +32,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="mx-auto flex max-w-7xl items-center gap-8 px-6 py-3">
             <Link href="/" className="font-semibold tracking-tight">USAspending</Link>
             <nav className="flex gap-5">
-              <NavLink href="/">Spending Explorer</NavLink>
+              <NavLink href="/">Contracts</NavLink>
+              <NavLink href="/assistance">Assistance</NavLink>
               <NavLink href="/table-builder">Table Builder</NavLink>
               <NavLink href="/downloads">Data Downloads</NavLink>
             </nav>

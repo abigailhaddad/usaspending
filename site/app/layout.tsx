@@ -32,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="font-semibold tracking-tight">USAspending</Link>
             <nav className="flex gap-5">
               <NavLink href="/">Spending Explorer</NavLink>
+              <NavLink href="/table-builder">Table Builder</NavLink>
               <NavLink href="/downloads">Data Downloads</NavLink>
             </nav>
           </div>

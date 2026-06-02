@@ -16,6 +16,7 @@ import table          # noqa: E402
 import filter_options  # noqa: E402
 import colab          # noqa: E402
 import downloads      # noqa: E402
+import reproduce      # noqa: E402
 from data_loader import CACHE_CONTROL  # noqa: E402
 
 
@@ -43,6 +44,8 @@ class H(SimpleHTTPRequestHandler):
             return self._json(lambda: table.detail_response(q))
         if path == "/api/fields":
             return self._json(lambda: table.fields_response(q))
+        if path == "/api/reproduce":
+            return self._json(lambda: reproduce.reproduce_response(q))
         if path == "/api/downloads":
             return self._json(downloads.build_index)
         if path == "/api/filter_options":

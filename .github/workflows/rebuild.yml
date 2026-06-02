@@ -1,0 +1,101 @@
+name: Rebuild downstream (serve → R2 → precompute)
+
+# One pipeline to run after new raw data lands (replaces the separate compact / sync_r2 /
+# precompute workflows). Jobs run in order via `needs`; data passes between them through
+# HuggingFace + R2, not job artifacts:
+#   1. compact     — per-agency raw files → one parquet per (product, fiscal year) on HF (serve/)
+#   2. sync_r2     — copy serve/ from HF into Cloudflare R2 (the site's query backend)
+#   3. precompute  — read the serve layer from R2, regenerate the dashboard JSON, commit it
+
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: "contracts | assistance | both (compaction)"
+        default: "both"
+      years:
+        description: "comma-separated fiscal years, or blank for all present"
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  compact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q duckdb huggingface_hub
+      - name: Compact raw files into the serve layer (HF)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          ARGS=""
+          P="${{ github.event.inputs.product }}"
+          [ -n "$P" ] && [ "$P" != "both" ] && ARGS="--product $P"
+          [ -n "${{ github.event.inputs.years }}" ] && ARGS="$ARGS --years ${{ github.event.inputs.years }}"
+          python -m usaspending_archive.compact_serve $ARGS
+
+  sync_r2:
+    needs: compact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download serve layer from HuggingFace
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install -q "huggingface_hub>=0.25"
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+          snapshot_download("abigailhaddad/usaspending-bulk-awards", repo_type="dataset",
+                            allow_patterns="serve/**", local_dir="hf_serve",
+                            token=os.environ["HF_TOKEN"])
+          PY
+          du -sh hf_serve/serve
+      - name: Upload serve layer to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.CF_R2_ACCOUNT_ID }}
+          # R2 doesn't support the newer aws-cli default request checksums
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          aws s3 sync hf_serve/serve "s3://usaspending/bulk-awards/serve" \
+            --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" --no-progress
+
+  precompute:
+    needs: sync_r2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q "duckdb==1.5.2"
+      - name: Generate precomputed aggregates
+        env:
+          CF_R2_ACCOUNT_ID: ${{ secrets.CF_R2_ACCOUNT_ID }}
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_BUCKET: usaspending
+          CF_R2_PREFIX: bulk-awards/
+        run: python usaspending_archive/precompute.py
+      - name: Commit precomputed JSON
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add site/public/precomputed
+          git commit -m "Regenerate precomputed dashboard aggregates [skip ci]" || { echo "no changes"; exit 0; }
+          # main may have advanced while we ran — rebase onto it before pushing
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main

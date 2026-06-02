@@ -244,11 +244,29 @@ function Breakdown({ title, dim, years, labelMap }: {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+// OPM-style "story" block: a question headline → a big data-driven hero number (auto-updates
+// from the precomputed data) → a short evergreen explainer (no specific figures, so it never
+// goes stale) → the interactive tool.
+function Section({ q, intro, stat, children }: {
+  q: string; intro?: string; stat?: { value: string; label: string }; children?: React.ReactNode;
+}) {
   return (
-    <section className="space-y-3 border-t pt-8">
-      <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-      <div className="space-y-3">{children}</div>
+    <section className="space-y-4 border-t pt-10">
+      <h2 className="flex items-start gap-3 text-2xl font-bold tracking-tight">
+        <span className="mt-2 inline-block h-3 w-3 shrink-0 rounded-full bg-primary/40" />
+        {q}
+      </h2>
+      {stat && (
+        <div className="border-l-4 border-primary pl-5">
+          <div className="text-4xl font-bold tracking-tight text-primary tabular-nums sm:text-5xl">{stat.value}</div>
+          <div className="mt-1 text-base text-muted-foreground">{stat.label}</div>
+          <div className="mt-2 text-xs font-medium text-muted-foreground">
+            Source: <a className="underline hover:text-foreground" href="https://files.usaspending.gov/award_data_archive/" target="_blank" rel="noreferrer">USAspending Award Data Archive</a>
+          </div>
+        </div>
+      )}
+      {intro && <p className="max-w-3xl text-muted-foreground">{intro}</p>}
+      {children && <div className="space-y-4 pt-1">{children}</div>}
     </section>
   );
 }
@@ -261,59 +279,69 @@ export function Explorer({ dataset }: { dataset: string }) {
   }, [dataset]);
 
   const kpi = data?.kpis["all"];
-  const noun = dataset === "contracts" ? "contract" : "assistance";
+  const isC = dataset === "contracts";
+  const noun = isC ? "contract" : "assistance";
   const dim = (k: string) => data?.dims[k];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <div className="max-w-3xl">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Federal {dataset === "contracts" ? "Contract" : "Assistance"} Spending
+          Federal {isC ? "Contract" : "Assistance"} Spending
         </h1>
         <p className="mt-1 text-muted-foreground">
           Twenty years of federal {noun} awards (FY2007–2026), from the public USAspending Award Data Archive.
-          Explore the curated views below, or <Link href="/table-builder" className="underline hover:text-foreground">build your own query</Link> for anything else.
+          Explore the views below, or <Link href="/table-builder" className="underline hover:text-foreground">build your own query</Link> for anything else.
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[
-          { label: "Total obligations, FY2007–2026", value: kpi ? fmtUSD(kpi.obl) : "" },
-          { label: "Transactions", value: kpi ? fmtNum(kpi.txn) : "" },
-          { label: "Avg per transaction", value: kpi && kpi.txn ? fmtUSD(kpi.obl / kpi.txn) : "" },
-        ].map((t) => (
-          <Card key={t.label}><CardContent className="py-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t.label}</div>
-            {data ? <div className="mt-1 text-2xl font-semibold tabular-nums">{t.value}</div>
-                  : <div className="mt-2 h-7 w-28 animate-pulse rounded bg-muted" />}
-          </CardContent></Card>
-        ))}
-      </div>
-
-      {!data ? (
+      {!data || !kpi ? (
         <div className="h-96 animate-pulse rounded-xl bg-muted/50" />
       ) : (
         <>
-          <Section title="How spending has changed over time">
-            <p className="max-w-3xl text-sm text-muted-foreground">
-              Total {noun} obligations by fiscal year. Narrow to a single agency or sub-agency, or a range of years,
-              to see how a corner of the government has grown or shrunk.
-            </p>
+          <Section
+            q={`How much does the U.S. government spend on ${isC ? "contracts" : "assistance"}?`}
+            stat={{
+              value: fmtUSD(kpi.obl),
+              label: `in federal ${noun} obligations over FY2007–2026 — across ${fmtNum(kpi.txn)} awards, averaging ${kpi.txn ? fmtUSD(kpi.obl / kpi.txn) : "—"} each`,
+            }}
+            intro={isC
+              ? "When the federal government buys goods and services — everything from fighter jets to office supplies and IT — it does so through contracts. Every prime contract award is reported to USAspending.gov; these views summarize twenty years of it."
+              : "Beyond buying goods and services, the government distributes money through grants, loans, direct payments, and other financial assistance — to states, organizations, and individuals. These views summarize twenty years of it."}
+          />
+
+          <Section
+            q={`How has ${noun} spending changed over time?`}
+            intro="Spending rises and falls with budgets, emergencies, and policy. Track total obligations by fiscal year, and narrow to a single agency or sub-agency to see how its spending has shifted."
+          >
             <SpendingOverTime data={data} />
           </Section>
 
-          <Section title="Who receives the money">
-            {dim("recipient") && <Breakdown title="Top recipients" dim={dim("recipient")!} years={data.years} />}
-          </Section>
+          {dim("recipient") && (
+            <Section
+              q="Who receives the money?"
+              intro={`A relatively small number of large organizations account for much of federal ${noun} spending. These are the top recipients.`}
+            >
+              <Breakdown title="Top recipients" dim={dim("recipient")!} years={data.years} />
+            </Section>
+          )}
 
-          <Section title="What it buys, and where">
+          <Section
+            q={isC ? "What does it buy, and where?" : "What is it for, and where does it go?"}
+            intro={isC
+              ? "Contracts are categorized by industry (NAICS) and by the product or service bought (PSC), and tied to where the recipient is located."
+              : "Assistance is tied to where recipients are located. Use the views below to see how it is distributed."}
+          >
             {dim("naics") && <Breakdown title="Top industries (NAICS)" dim={dim("naics")!} years={data.years} />}
             {dim("psc") && <Breakdown title="Top products & services (PSC)" dim={dim("psc")!} years={data.years} />}
             {dim("state") && <Breakdown title="By recipient state" dim={dim("state")!} years={data.years} labelMap={STATE_NAMES} />}
           </Section>
 
           {(dim("competition") || dim("set_aside") || dim("business_size")) && (
-            <Section title="How awards are made">
+            <Section
+              q="How are awards made?"
+              intro="Contracts can be competed openly or awarded without competition, and many are set aside for small or disadvantaged businesses."
+            >
               {dim("competition") && <Breakdown title="Competition" dim={dim("competition")!} years={data.years} />}
               {dim("set_aside") && <Breakdown title="Set-aside type" dim={dim("set_aside")!} years={data.years} />}
               {dim("business_size") && <Breakdown title="Business size" dim={dim("business_size")!} years={data.years} />}

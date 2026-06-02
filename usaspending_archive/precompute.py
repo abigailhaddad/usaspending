@@ -175,6 +175,72 @@ def build_filters(dataset, con):
     return out
 
 
+import re
+
+# dims that get a per-agency breakdown (skip the agency dims themselves — trivial within one agency)
+AGENCY_BREAKDOWN_DIMS = ("recipient", "state", "naics", "psc", "competition", "set_aside",
+                         "assistance_type", "cfda", "business_size")
+
+
+def _slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "unknown"
+
+
+def build_agency_files(dataset, con, timeseries, dest):
+    """Per-agency files (same schema as the main file) so the page can re-scope to one agency.
+    Bounded via window-function top-15 per (agency, period): one scan per dim covers all
+    agencies at once. KPIs + timeseries come from the (fy x agency x sub) cube (no extra scan)."""
+    src = source(dataset)
+    dims = {k: v for k, v in DIMS[dataset].items() if k in AGENCY_BREAKDOWN_DIMS}
+    per = {}  # agency -> {dim -> {label,categorical,periods}}
+
+    def slot(agency, key, label, categorical):
+        d = per.setdefault(agency, {}).setdefault(key, {"label": label, "categorical": categorical, "periods": {}})
+        return d["periods"]
+
+    for key, (label, col, categorical) in dims.items():
+        # top-15 per (agency, fiscal year)
+        sql_fy = (
+            f"SELECT agency, fy, val, obl, txn FROM ("
+            f"  SELECT awarding_agency_name agency, action_date_fiscal_year fy, {col} val, "
+            f"         sum({OBL}) obl, count(*) txn, "
+            f"         row_number() OVER (PARTITION BY awarding_agency_name, action_date_fiscal_year ORDER BY sum({OBL}) DESC) rn "
+            f"  FROM {src} WHERE {col} IS NOT NULL AND awarding_agency_name IS NOT NULL AND action_date_fiscal_year IS NOT NULL "
+            f"  GROUP BY 1, 2, 3) WHERE rn <= 15")
+        for agency, fy, val, obl, txn in con.execute(sql_fy).fetchall():
+            slot(agency, key, label, categorical).setdefault(fy, []).append({"label": val, "obl": obl or 0, "txn": txn})
+        # top-15 per (agency, all years)
+        sql_all = (
+            f"SELECT agency, val, obl, txn FROM ("
+            f"  SELECT awarding_agency_name agency, {col} val, sum({OBL}) obl, count(*) txn, "
+            f"         row_number() OVER (PARTITION BY awarding_agency_name ORDER BY sum({OBL}) DESC) rn "
+            f"  FROM {src} WHERE {col} IS NOT NULL AND awarding_agency_name IS NOT NULL "
+            f"  GROUP BY 1, 2) WHERE rn <= 15")
+        for agency, val, obl, txn in con.execute(sql_all).fetchall():
+            slot(agency, key, label, categorical).setdefault("all", []).append({"label": val, "obl": obl or 0, "txn": txn})
+        print(f"  agency breakdown: {key}", flush=True)
+
+    years = sorted({r["fy"] for r in timeseries})
+    agdir = dest / dataset / "agency"
+    agdir.mkdir(parents=True, exist_ok=True)
+    agencies = sorted({r["agency"] for r in timeseries})
+    listing = []
+    for a in agencies:
+        rows = [r for r in timeseries if r["agency"] == a]
+        kpis = {}
+        for fy in years:
+            kpis[fy] = {"obl": sum(r["obl"] for r in rows if r["fy"] == fy),
+                        "txn": sum(r["txn"] for r in rows if r["fy"] == fy)}
+        kpis["all"] = {"obl": sum(r["obl"] for r in rows), "txn": sum(r["txn"] for r in rows)}
+        f = {"years": years, "kpis": kpis, "dims": per.get(a, {}),
+             "timeseries": rows, "agency": a}
+        slug = _slug(a)
+        (agdir / f"{slug}.json").write_text(json.dumps(f, separators=(",", ":")))
+        listing.append({"name": a, "slug": slug})
+    print(f"  wrote {len(listing)} per-agency files under {agdir}", flush=True)
+    return listing
+
+
 def main():
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site" / "api"))
@@ -184,10 +250,11 @@ def main():
     for dataset in ("contracts", "assistance"):
         print(f"precomputing {dataset} …", flush=True)
         data = build(dataset, con)
+        data["agencies"] = build_agency_files(dataset, con, data["timeseries"], dest)
         path = dest / f"{dataset}.json"
         path.write_text(json.dumps(data, separators=(",", ":")))
         print(f"  wrote {path} ({path.stat().st_size/1e6:.2f} MB, "
-              f"{len(data['years'])} years, {len(data['dims'])} dims)", flush=True)
+              f"{len(data['years'])} years, {len(data['dims'])} dims, {len(data['agencies'])} agencies)", flush=True)
 
         filters = build_filters(dataset, con)
         fpath = dest / f"{dataset}.filters.json"

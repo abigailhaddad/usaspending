@@ -28,8 +28,11 @@ def source_expr(dataset):
         return tmpl.format(dataset=dataset)
     if os.environ.get("CF_R2_BUCKET"):
         bucket = os.environ["CF_R2_BUCKET"]
-        return (f"read_parquet('s3://{bucket}/{dataset}/**/*.parquet', "
-                f"hive_partitioning=true, union_by_name=true)")
+        prefix = os.environ.get("CF_R2_PREFIX", "")  # e.g. "bulk-awards/" to namespace a shared bucket
+        # The serving layer on R2: one parquet per fiscal year (mirrors hf_source's layout),
+        # so reads are a single low-latency dir listing — fast cold, no HuggingFace throttling.
+        return (f"read_parquet('s3://{bucket}/{prefix}serve/{dataset}/*.parquet', "
+                f"union_by_name=true)")
     return query.hf_source(dataset)
 
 

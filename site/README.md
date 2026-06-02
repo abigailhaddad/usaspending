@@ -1,3 +1,7 @@
+> ## ⚠️ PROTOTYPE — DO NOT USE YET
+> Work in progress. Data and figures are not validated and may be wrong.
+> Not for analysis or decisions.
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

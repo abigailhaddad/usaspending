@@ -1,311 +1,290 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { DateRange } from "react-day-picker";
+import {
+  Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import type { DateRange } from "react-day-picker";
 import { DateRangePicker } from "@/components/date-range";
-import { DIMENSIONS, METRICS, FILTER_FIELDS, DATASETS } from "@/lib/registry";
-import { fmtCell } from "@/lib/format";
+import { MultiSelect } from "@/components/multi-select";
+import { FieldPicker } from "@/components/field-picker";
+import { DATASETS, FILTER_FIELDS } from "@/lib/registry";
 
-type Repro = { python: string; sql: string };
-type TableResult = {
-  label: string; dimension: string; group_cols: number; columns: string[];
-  data: (string | number | null)[][]; reproduce: Repro;
-};
-type Filter = {
-  id: number; field: string;
-  options: { value: string; label: string }[] | null;
-  searchable: boolean; selected: string[]; text: string;
-};
-
-const isoLocal = (d: Date) =>
+const GREEN = "#2d6a4f";
+type Row = { label: string; value: number };
+const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const parseLocal = (s: string) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
-let fid = 1;
+const money = (v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}B`;
+const fmtUSD = (v: number) => {
+  const a = Math.abs(v);
+  if (a >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
+  if (a >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
+  if (a >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+  return `$${Math.round(v).toLocaleString()}`;
+};
 
-function Step({ n, title, hint, children }: { n: number; title: string; hint?: string; children: React.ReactNode }) {
+function KpiBar({ dataset, qs }: { dataset: string; qs: string }) {
+  const [k, setK] = useState<{ obl: number; txn: number; y0: string; y1: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let on = true; setLoading(true);
+    fetch(`/api/table?dataset=${dataset}&rows=fiscal_year&metric=obligations,transactions${qs ? `&${qs}` : ""}`)
+      .then((r) => r.json()).then((j) => {
+        if (!on) return;
+        const rows = (j.tables?.[0]?.data || []) as [string, number, number][];
+        let obl = 0, txn = 0; const yrs: string[] = [];
+        for (const r of rows) { if (r[1]) obl += r[1]; if (r[2]) txn += r[2]; if (r[0]) yrs.push(String(r[0])); }
+        yrs.sort();
+        setK({ obl, txn, y0: yrs[0] || "", y1: yrs[yrs.length - 1] || "" });
+        setLoading(false);
+      }).catch(() => { if (on) setLoading(false); });
+    return () => { on = false; };
+  }, [dataset, qs]);
+  const tiles = [
+    { label: "Total obligations", value: k ? fmtUSD(k.obl) : "" },
+    { label: "Transactions", value: k ? k.txn.toLocaleString() : "" },
+    { label: "Avg per transaction", value: k && k.txn ? fmtUSD(k.obl / k.txn) : "" },
+    { label: "Fiscal years", value: k ? (k.y0 && k.y0 === k.y1 ? k.y0 : k.y0 ? `${k.y0}–${k.y1}` : "—") : "" },
+  ];
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {tiles.map((t) => (
+        <Card key={t.label}>
+          <CardContent className="py-4">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t.label}</div>
+            {loading
+              ? <div className="mt-2 h-7 w-28 animate-pulse rounded bg-muted" />
+              : <div className="mt-1 text-2xl font-semibold tabular-nums">{t.value || "—"}</div>}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+async function agg(dataset: string, dim: string, top: number | undefined, qs: string): Promise<Row[]> {
+  let u = `/api/table?dataset=${dataset}&rows=${dim}&metric=obligations`;
+  if (top) u += `&top=${top}`;
+  if (qs) u += `&${qs}`;
+  const j = await (await fetch(u)).json();
+  if (!j.tables?.[0]) return [];
+  return j.tables[0].data
+    .filter((r: unknown[]) => r[0] != null && r[1] != null)
+    .map((r: [string, number]) => ({ label: String(r[0]), value: r[1] / 1e9 }));
+}
+
+function Panel({
+  title, dataset, dim, top, qs, horizontal = true, builderDim,
+}: { title: string; dataset: string; dim: string; top?: number; qs: string; horizontal?: boolean; builderDim?: string }) {
+  const [data, setData] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  useEffect(() => {
+    let on = true; setLoading(true);
+    agg(dataset, dim, top, qs).then((d) => { if (on) { setData(d); setLoading(false); } });
+    return () => { on = false; };
+  }, [dataset, dim, top, qs]);
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2.5 text-base">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">{n}</span>
-          {title}
-        </CardTitle>
-        {hint && <p className="pl-8 text-sm text-muted-foreground">{hint}</p>}
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-base">{title}</CardTitle>
+        {builderDim && (
+          <Button variant="ghost" size="sm"
+            onClick={() => router.push(`/?dataset=${dataset}&rows=${builderDim}&metric=obligations${qs ? `&${qs}` : ""}`)}>
+            open in builder →
+          </Button>
+        )}
       </CardHeader>
-      <CardContent>{children}</CardContent>
+      <CardContent>
+        {loading ? <div className="h-[320px] w-full animate-pulse rounded bg-muted/60" />
+          : data.length === 0 ? <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">no data for these filters</div>
+          : horizontal ? (
+            <ResponsiveContainer width="100%" height={Math.max(320, data.length * 26)}>
+              <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
+                <CartesianGrid horizontal={false} stroke="#eee" />
+                <XAxis type="number" tickFormatter={(v) => `$${v}B`} fontSize={12} stroke="#888" />
+                <YAxis type="category" dataKey="label" width={240} fontSize={12} stroke="#555" interval={0}
+                  tickFormatter={(v: string) => (v.length > 38 ? v.slice(0, 37) + "…" : v)} />
+                <Tooltip formatter={(v: number) => money(v)} labelFormatter={(l) => String(l)} cursor={{ fill: "rgba(45,106,79,0.06)" }} />
+                <Bar dataKey="value" fill={GREEN} radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={data} margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+                <CartesianGrid vertical={false} stroke="#eee" />
+                <XAxis dataKey="label" fontSize={12} stroke="#888" />
+                <YAxis tickFormatter={(v) => `$${v}B`} fontSize={12} stroke="#888" />
+                <Tooltip formatter={(v: number) => money(v)} cursor={{ fill: "rgba(45,106,79,0.06)" }} />
+                <Bar dataKey="value" fill={GREEN} radius={[3, 3, 0, 0]}>{data.map((_, i) => <Cell key={i} />)}</Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+      </CardContent>
     </Card>
   );
 }
 
-export default function TableBuilder() {
-  const [dataset, setDataset] = useState("contracts");
-  const [rows, setRows] = useState<string[]>(["funding_subagency"]);
-  const [metrics, setMetrics] = useState<string[]>(["obligations"]);
-  const [compare, setCompare] = useState(false);
-  const [aRange, setARange] = useState<DateRange | undefined>();
-  const [bRange, setBRange] = useState<DateRange | undefined>();
-  const [filters, setFilters] = useState<Filter[]>([]);
-  const [tables, setTables] = useState<TableResult[]>([]);
-  const [repro, setRepro] = useState<Repro | null>(null);
+function fmtCell(v: unknown, col: string) {
+  if (v == null) return "";
+  if (typeof v === "number") {
+    if (col.includes("obligation")) return `$${(v / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })}M`;
+    return v.toLocaleString();
+  }
+  return String(v);
+}
+
+function ResultsTable({ dataset, qs }: { dataset: string; qs: string }) {
+  const [cols, setCols] = useState<string[]>([]);
+  const [rows, setRows] = useState<(string | number | null)[][]>([]);
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
-  const loaded = useRef(false);
-
-  function buildParams(): URLSearchParams {
-    const p = new URLSearchParams();
-    p.set("dataset", dataset);
-    if (rows.length) p.set("rows", rows.join(","));
-    if (metrics.length) p.set("metric", metrics.join(","));
-    if (aRange?.from && aRange?.to) p.set("periodA", `${isoLocal(aRange.from)}..${isoLocal(aRange.to)}`);
-    if (compare && bRange?.from && bRange?.to) p.set("periodB", `${isoLocal(bRange.from)}..${isoLocal(bRange.to)}`);
-    for (const f of filters) {
-      const vals = f.searchable ? f.text.split(",").map((x) => x.trim()).filter(Boolean) : f.selected;
-      if (vals.length) p.set(`filter_${f.field}`, vals.join("|"));
-    }
-    return p;
-  }
-
-  async function run(explicit?: URLSearchParams) {
-    setStatus("Running…");
-    const p = explicit ?? buildParams();
-    if (!explicit) window.history.replaceState(null, "", "?" + p.toString());
-    try {
-      const j = await (await fetch("/api/table?" + p.toString())).json();
-      if (j.error) { setStatus("Error: " + j.error); return; }
-      setTables(j.tables);
-      if (j.tables.length) setRepro(j.tables[0].reproduce);
-      setStatus(`${j.tables.length} table${j.tables.length === 1 ? "" : "s"}`);
-    } catch (e) { setStatus("Error: " + (e as Error).message); }
-  }
-
-  async function loadOptions(field: string): Promise<Partial<Filter>> {
-    try {
-      const j = await (await fetch(`/api/filter_options?field=${encodeURIComponent(field)}&dataset=${dataset}`)).json();
-      return j.options ? { options: j.options, searchable: false } : { options: [], searchable: true };
-    } catch { return { options: [], searchable: true }; }
-  }
-  async function addFilter(field = "funding_subagency_code", preset: string[] = []) {
-    const id = fid++;
-    setFilters((fs) => [...fs, { id, field, options: null, searchable: false, selected: preset, text: preset.join(", ") }]);
-    const opt = await loadOptions(field);
-    setFilters((fs) => fs.map((f) => (f.id === id ? { ...f, ...opt } : f)));
-  }
-  function updateFilter(id: number, patch: Partial<Filter>) {
-    setFilters((fs) => fs.map((f) => (f.id === id ? { ...f, ...patch } : f)));
-  }
-  async function changeFilterField(id: number, field: string) {
-    updateFilter(id, { field, options: null, selected: [], text: "" });
-    const opt = await loadOptions(field);
-    updateFilter(id, { field, ...opt });
-  }
-
   useEffect(() => {
-    if (loaded.current) return; loaded.current = true;
-    const p = new URLSearchParams(window.location.search);
-    if (![...p.keys()].length) { addFilter(); return; }
-    setDataset(p.get("dataset") || "contracts");
-    setRows((p.get("rows") || "funding_subagency").split(","));
-    setMetrics((p.get("metric") || "obligations").split(","));
-    const pa = p.get("periodA"); if (pa) { const [s, e] = pa.split(".."); setARange({ from: parseLocal(s), to: parseLocal(e) }); }
-    const pb = p.get("periodB"); if (pb) { setCompare(true); const [s, e] = pb.split(".."); setBRange({ from: parseLocal(s), to: parseLocal(e) }); }
-    const fkeys = [...p.keys()].filter((k) => k.startsWith("filter_"));
-    fkeys.forEach((k) => addFilter(k.slice(7), (p.get(k) || "").split("|")));
-    if (!fkeys.length) addFilter();
-    run(p);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let on = true; setLoading(true);
+    fetch(`/api/detail?dataset=${dataset}&limit=200${qs ? `&${qs}` : ""}`)
+      .then((r) => r.json()).then((j) => { if (on) { setCols(j.columns || []); setRows(j.data || []); setLoading(false); } });
+    return () => { on = false; };
+  }, [dataset, qs]);
 
-  const toggle = (arr: string[], v: string, set: (a: string[]) => void) =>
-    set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
-
-  function downloadCSV(columns: string[], data: (string | number | null)[][], name: string) {
+  async function downloadAll() {
+    setStatus("Fetching all matching records…");
+    const j = await (await fetch(`/api/detail?dataset=${dataset}${qs ? `&${qs}` : ""}`)).json();
     const esc = (x: unknown) => (x == null ? "" : `"${String(x).replace(/"/g, '""')}"`);
-    const csv = [columns.map(esc).join(","), ...data.map((r) => r.map(esc).join(","))].join("\n");
+    const csv = [j.columns.map(esc).join(","), ...j.data.map((r: unknown[]) => r.map(esc).join(","))].join("\n");
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = name; a.click();
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "records.csv"; a.click();
+    setStatus(`${j.count} records${j.truncated ? " (capped at 100k)" : ""} downloaded`);
   }
-  async function records() {
-    setStatus("Fetching matching records…");
-    try {
-      const j = await (await fetch("/api/detail?" + buildParams().toString())).json();
-      if (j.error) { setStatus("Error: " + j.error); return; }
-      downloadCSV(j.columns, j.data, "records.csv");
-      setStatus(`${j.count} records${j.truncated ? " (capped at 100k)" : ""}`);
-    } catch (e) { setStatus("Error: " + (e as Error).message); }
-  }
-  async function openColab() {
-    if (!repro) return;
-    setStatus("Creating Colab notebook…");
-    try {
-      const j = await (await fetch("/api/colab", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql: repro.sql }) })).json();
-      if (j.colab_url) { window.open(j.colab_url, "_blank"); setStatus("Opened in Colab"); }
-      else setStatus("Colab error: " + (j.error || "?"));
-    } catch (e) { setStatus("Colab error: " + (e as Error).message); }
-  }
-  const cellClass = (col: string, v: unknown) =>
-    col.includes("— Δ") && typeof v === "number" ? (v < 0 ? "text-red-600" : "text-emerald-700") : "";
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle className="text-base">Matching records</CardTitle>
+          <p className="text-sm text-muted-foreground">Individual awards behind the charts above (preview of the first 200).</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">{status}</span>
+          <Button variant="outline" size="sm" onClick={downloadAll}>Download all (CSV)</Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="max-h-[520px] overflow-auto rounded-md border">
+          <Table>
+            <TableHeader className="sticky top-0 bg-muted">
+              <TableRow>{cols.map((c) => <TableHead key={c} className="whitespace-nowrap">{c}</TableHead>)}</TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading && Array.from({ length: 8 }).map((_, ri) => (
+                <TableRow key={ri}>{Array.from({ length: cols.length || 6 }).map((__, ci) => (
+                  <TableCell key={ci}><div className="h-4 w-full min-w-16 animate-pulse rounded bg-muted/60" /></TableCell>
+                ))}</TableRow>
+              ))}
+              {!loading && rows.length === 0 && <TableRow><TableCell colSpan={cols.length || 1} className="text-muted-foreground">no records</TableCell></TableRow>}
+              {rows.map((r, ri) => (
+                <TableRow key={ri}>{r.map((v, ci) => (
+                  <TableCell key={ci} className="whitespace-nowrap">{fmtCell(v, cols[ci])}</TableCell>
+                ))}</TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function Explorer() {
+  const [dataset, setDataset] = useState("contracts");
+  const [range, setRange] = useState<DateRange | undefined>();
+  const [filters, setFilters] = useState<Record<string, string[]>>({});
+  const [labels, setLabels] = useState<Record<string, string>>({});
+
+  const flabel = (field: string) => labels[field] || FILTER_FIELDS[field] || field.replace(/_/g, " ");
+  const setVals = (field: string, vals: string[]) => setFilters((f) => ({ ...f, [field]: vals }));
+  const removeField = (field: string) => setFilters((f) => { const n = { ...f }; delete n[field]; return n; });
+  const removeValue = (field: string, v: string) => setFilters((f) => {
+    const vals = (f[field] || []).filter((x) => x !== v);
+    if (!vals.length) { const n = { ...f }; delete n[field]; return n; }
+    return { ...f, [field]: vals };
+  });
+  const clearAll = () => { setRange(undefined); setFilters({}); };
+
+  const p = new URLSearchParams();
+  if (range?.from && range?.to) p.set("periodA", `${iso(range.from)}..${iso(range.to)}`);
+  for (const [field, vals] of Object.entries(filters)) if (vals.length) p.set(`filter_${field}`, vals.join("|"));
+  const qs = p.toString();
+
+  const activeFields = Object.keys(filters);
+  const chips = Object.entries(filters).flatMap(([field, vals]) => vals.map((v) => ({ field, v })));
+
+  return (
+    <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Table Builder</h1>
-        <p className="mt-1 text-muted-foreground">
-          Build custom tables of federal spending — pick a timeframe, break it down any way you like,
-          compare two periods, and get the exact code to reproduce every number.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">Spending Explorer</h1>
+        <p className="mt-1 text-muted-foreground">Filter federal spending any way you like, then explore the charts and the matching records.</p>
       </div>
 
-      <Step n={1} title="Select a dataset">
-        <div className="grid gap-3 sm:grid-cols-2">
-          {DATASETS.map((d) => (
-            <button key={d.value} onClick={() => setDataset(d.value)}
-              className={`rounded-lg border p-4 text-left transition-colors ${dataset === d.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}>
-              <div className="flex items-center gap-2 font-medium">
-                <span className={`flex h-4 w-4 items-center justify-center rounded-full border ${dataset === d.value ? "border-primary" : ""}`}>
-                  {dataset === d.value && <span className="h-2 w-2 rounded-full bg-primary" />}
-                </span>
-                {d.label}
-              </div>
-            </button>
-          ))}
-        </div>
-      </Step>
-
-      <Step n={2} title="Select a timeframe" hint="Leave blank for all time. Tip: group by “Month” in step 3 to see every month in the range.">
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="w-20 text-sm font-medium">Period A</span>
-            <DateRangePicker value={aRange} onChange={setARange} placeholder="Pick a date range" />
+      {/* filter panel */}
+      <Card className="sticky top-[57px] z-10">
+        <CardContent className="space-y-3 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={dataset} onValueChange={setDataset}>
+              <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>{DATASETS.map((d) => <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>)}</SelectContent>
+            </Select>
+            <DateRangePicker value={range} onChange={setRange} placeholder="All dates" />
+            {activeFields.map((field) => (
+              <span key={field} className="inline-flex items-center">
+                <MultiSelect field={field} dataset={dataset} label={flabel(field)}
+                  value={filters[field]} onChange={(v) => setVals(field, v)} />
+                <button className="ml-1 text-muted-foreground hover:text-foreground" onClick={() => removeField(field)} title="remove filter">✕</button>
+              </span>
+            ))}
+            <FieldPicker dataset={dataset} exclude={activeFields}
+              onPick={(field, label) => { setLabels((l) => ({ ...l, [field]: label })); setVals(field, filters[field] || []); }} />
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={compare} onCheckedChange={(c) => setCompare(!!c)} /> Compare to a second period
-          </label>
-          {compare && (
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="w-20 text-sm font-medium">Period B</span>
-              <DateRangePicker value={bRange} onChange={setBRange} placeholder="Pick a date range" />
+          {(chips.length > 0 || range?.from) && (
+            <div className="flex flex-wrap items-center gap-1.5 border-t pt-2">
+              {range?.from && range?.to && (
+                <Badge variant="secondary" className="gap-1">{iso(range.from)} – {iso(range.to)}
+                  <button onClick={() => setRange(undefined)}>✕</button></Badge>
+              )}
+              {chips.map(({ field, v }) => (
+                <Badge key={field + v} variant="secondary" className="gap-1">
+                  <span className="text-muted-foreground">{flabel(field)}:</span> {v}
+                  <button onClick={() => removeValue(field, v)}>✕</button>
+                </Badge>
+              ))}
+              <button className="ml-1 text-xs text-muted-foreground underline" onClick={clearAll}>clear all</button>
             </div>
           )}
-        </div>
-      </Step>
+        </CardContent>
+      </Card>
 
-      <Step n={3} title="Select table elements" hint="Group by one or more fields — they combine into a single table (GROUP BY a, b, …). Pick measures to aggregate.">
-        <div className="space-y-4">
-          <div>
-            <Label className="mb-1.5 block">Group by</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {Object.entries(DIMENSIONS).map(([k, v]) => (
-                <Badge key={k} variant={rows.includes(k) ? "default" : "outline"} className="cursor-pointer" onClick={() => toggle(rows, k, setRows)}>{v}</Badge>
-              ))}
-            </div>
-          </div>
-          <div>
-            <Label className="mb-1.5 block">Measures</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {Object.entries(METRICS).map(([k, v]) => (
-                <Badge key={k} variant={metrics.includes(k) ? "default" : "outline"} className="cursor-pointer" onClick={() => toggle(metrics, k, setMetrics)}>{v}</Badge>
-              ))}
-            </div>
-          </div>
-        </div>
-      </Step>
+      <KpiBar dataset={dataset} qs={qs} />
 
-      <Step n={4} title="Filters (optional)">
-        <div className="space-y-3">
-          {filters.map((f) => (
-            <div key={f.id} className="space-y-1.5 rounded-md border p-2">
-              <Select value={f.field} onValueChange={(v) => changeFilterField(f.id, v)}>
-                <SelectTrigger className="h-8 w-full text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.entries(FILTER_FIELDS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
-              </Select>
-              {f.options === null && <p className="text-xs text-muted-foreground">loading…</p>}
-              {f.options && f.searchable && (
-                <Input className="h-8 text-sm" placeholder="values, comma-separated" value={f.text} onChange={(e) => updateFilter(f.id, { text: e.target.value })} />
-              )}
-              {f.options && !f.searchable && (
-                <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
-                  {f.options.map((o) => (
-                    <label key={o.value} className="flex cursor-pointer items-center gap-2 text-sm">
-                      <Checkbox checked={f.selected.includes(o.value)} onCheckedChange={() => updateFilter(f.id, { selected: f.selected.includes(o.value) ? f.selected.filter((x) => x !== o.value) : [...f.selected, o.value] })} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-          <Button variant="outline" size="sm" onClick={() => addFilter()}>+ filter</Button>
-        </div>
-      </Step>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="lg" onClick={() => run()}>Generate table</Button>
-        <Button variant="outline" onClick={() => { navigator.clipboard.writeText(location.href); setStatus("Link copied"); }}>Copy link</Button>
-        <Button variant="outline" onClick={records}>Download matching records (CSV)</Button>
-        <span className="text-sm text-muted-foreground">{status}</span>
+      <Panel title="Obligations by fiscal year" dataset={dataset} dim="fiscal_year" qs={qs} horizontal={false} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Panel title="Top awarding agencies" dataset={dataset} dim="awarding_agency" top={15} qs={qs} builderDim="awarding_agency" />
+        <Panel title="Top recipients" dataset={dataset} dim="recipient" top={15} qs={qs} builderDim="recipient" />
+        <Panel title="Top states" dataset={dataset} dim="state" top={15} qs={qs} builderDim="state" />
+        <Panel title="Competition" dataset={dataset} dim="extent_competed" qs={qs} builderDim="extent_competed" />
+        <Panel title="Top products & services" dataset={dataset} dim="psc_desc" top={15} qs={qs} builderDim="psc_desc" />
+        <Panel title="Top industries (NAICS)" dataset={dataset} dim="naics_desc" top={15} qs={qs} builderDim="naics_desc" />
       </div>
 
-      {tables.map((t) => (
-        <Card key={t.dimension}>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">{t.label}</CardTitle>
-            <div className="flex gap-1">
-              <Button variant="ghost" size="sm" onClick={() => setRepro(t.reproduce)}>Show code</Button>
-              <Button variant="ghost" size="sm" onClick={() => downloadCSV(t.columns, t.data, t.dimension + ".csv")}>CSV</Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="max-h-[460px] overflow-auto rounded-md border">
-              <Table>
-                <TableHeader className="sticky top-0 bg-muted">
-                  <TableRow>{t.columns.map((c, i) => <TableHead key={i} className={i < t.group_cols ? "" : "text-right"}>{c}</TableHead>)}</TableRow>
-                </TableHeader>
-                <TableBody>
-                  {t.data.map((r, ri) => (
-                    <TableRow key={ri}>
-                      {r.map((v, ci) => (
-                        <TableCell key={ci} className={`${ci < t.group_cols ? "font-medium" : "text-right tabular-nums"} ${cellClass(t.columns[ci], v)}`}>{fmtCell(v, t.columns[ci])}</TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-
-      {repro && (
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between space-y-0">
-            <div>
-              <CardTitle className="text-base">Reproduce this result</CardTitle>
-              <p className="text-sm text-muted-foreground">This is the exact query the table above ran, against the public dataset — run it and you get the same numbers.</p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <Button variant="outline" size="sm" onClick={openColab}>▶ Open in Colab</Button>
-              <Button variant="outline" size="sm" onClick={() => {
-                const a = document.createElement("a");
-                a.href = URL.createObjectURL(new Blob([repro.python], { type: "text/plain" })); a.download = "reproduce.py"; a.click();
-              }}>Download .py</Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-auto whitespace-pre-wrap rounded-md bg-zinc-900 p-4 font-mono text-xs text-zinc-100">{repro.python}</pre>
-          </CardContent>
-        </Card>
-      )}
+      <ResultsTable dataset={dataset} qs={qs} />
     </div>
   );
 }

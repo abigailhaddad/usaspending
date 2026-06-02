@@ -55,6 +55,19 @@ METRICS = {
 
 DATE_COL = "action_date"
 
+# date columns the timeframe filter can use (allowlisted; label shown in the UI)
+DATE_FIELDS = {
+    "action_date": "Action date",
+    "period_of_performance_start_date": "Performance start",
+    "period_of_performance_current_end_date": "Performance end",
+    "last_modified_date": "Last modified date",
+}
+
+
+def resolve_date_col(field):
+    """Validated date column for the timeframe filter; defaults to action_date."""
+    return field if field in DATE_FIELDS else DATE_COL
+
 # Columns returned by the disaggregated (record-level) download, per dataset.
 DETAIL_COLUMNS = {
     "contracts": [

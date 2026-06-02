@@ -19,6 +19,12 @@ export const FILTER_FIELDS: Record<string, string> = {
   awarding_subagency_code: "Awarding sub-agency CODE",
   naics_code: "NAICS code (raw)", psc_code: "PSC code (raw)",
 };
+export const DATE_FIELDS: Record<string, string> = {
+  action_date: "Action date",
+  period_of_performance_start_date: "Performance start",
+  period_of_performance_current_end_date: "Performance end",
+  last_modified_date: "Last modified date",
+};
 export const DATASETS = [
   { value: "contracts", label: "Contracts (prime)" },
   { value: "assistance", label: "Assistance (grants/loans)" },

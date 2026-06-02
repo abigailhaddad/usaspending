@@ -48,6 +48,7 @@ def build_response(params):
     clauses, binds = parse_filters(params)
     top = params.get("top", [None])[0]
     base = dict(dataset=dataset, metrics=metrics, periodA=pa, periodB=pb,
+                date_field=params.get("date_field", ["action_date"])[0],
                 filter_clauses=clauses, filter_binds=binds,
                 limit=int(top) if top and top.isdigit() else None)
 
@@ -106,6 +107,7 @@ def detail_response(params, limit=100000):
     pa, pb = _period(params, "periodA"), _period(params, "periodB")
     clauses, binds = parse_filters(params)
     req = dict(dataset=dataset, periodA=pa, periodB=pb,
+               date_field=params.get("date_field", ["action_date"])[0],
                filter_clauses=clauses, filter_binds=binds)
     raw = params.get("limit", [""])[0]  # preview rows (table) vs full (download)
     if raw.isdigit():

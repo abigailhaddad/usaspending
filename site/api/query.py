@@ -11,7 +11,7 @@ comparison, allowlisted filters. (Column crosstab + more metrics are incremental
 """
 import re
 
-from dims import DATE_COL, DATASETS, DIMENSIONS, METRICS, OBL, UEI, HF_REPO, parse_filters, resolve_col
+from dims import DATE_COL, DATASETS, DIMENSIONS, METRICS, OBL, UEI, HF_REPO, parse_filters, resolve_col, resolve_date_col
 
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -25,14 +25,14 @@ def hf_source(dataset):
             f"union_by_name=true)")
 
 
-def _mask(period):
-    """period = (start, end) -> a SQL boolean on action_date. Dates strictly validated."""
+def _mask(period, date_col=DATE_COL):
+    """period = (start, end) -> a SQL boolean on the chosen date column. Strictly validated."""
     if not period:
         return "TRUE"
     s, e = period
     if not (_DATE.match(s) and _DATE.match(e)):
         raise ValueError("bad date")
-    return f"{DATE_COL} BETWEEN '{s}' AND '{e}'"
+    return f"TRY_CAST({date_col} AS DATE) BETWEEN '{s}' AND '{e}'"
 
 
 def _group_cols(req):
@@ -60,7 +60,8 @@ def build_sql(req):
     where = req.get("filter_clauses", [])
     binds = list(req.get("filter_binds", []))
     pa, pb = req.get("periodA"), req.get("periodB")
-    mask_a, mask_b = _mask(pa), _mask(pb) if pb else None
+    dcol = resolve_date_col(req.get("date_field"))
+    mask_a, mask_b = _mask(pa, dcol), _mask(pb, dcol) if pb else None
     if pa and pb:
         where = where + [f"({mask_a} OR {mask_b})"]
     elif pa:
@@ -122,7 +123,8 @@ def build_detail_sql(req, limit=100000):
     cols = DETAIL_COLUMNS.get(req["dataset"], DETAIL_COLUMNS["contracts"])
     where = list(req.get("filter_clauses", []))
     binds = list(req.get("filter_binds", []))
-    masks = [_mask(p) for p in (req.get("periodA"), req.get("periodB")) if p]
+    dcol = resolve_date_col(req.get("date_field"))
+    masks = [_mask(p, dcol) for p in (req.get("periodA"), req.get("periodB")) if p]
     if masks:
         where.append("(" + " OR ".join(masks) + ")")
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""

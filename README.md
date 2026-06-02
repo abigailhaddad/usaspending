@@ -1,5 +1,11 @@
 # usaspending
 
+> ## ⚠️ PROTOTYPE — DO NOT USE YET
+> This is an early work-in-progress prototype. The data pipeline, the published
+> HuggingFace dataset, and the BI site are **not validated**. Numbers may be
+> incomplete, double-counted, or otherwise wrong. **Do not use any output for
+> analysis, reporting, or decisions.** No support, no stability guarantees.
+
 Mirror the [USAspending Award Data Archive](https://files.usaspending.gov/award_data_archive/)
 (public-domain prime contract & assistance bulk files) into clean partitioned
 parquet, publish to HuggingFace, query from a Vercel BI site, and ship a Colab

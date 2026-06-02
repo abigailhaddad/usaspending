@@ -17,7 +17,12 @@ from dims import HF_REPO
 from data_loader import CACHE_CONTROL
 
 ROOT = Path(__file__).resolve().parents[2]
-MANIFEST = ROOT / "metadata" / "manifest.json"
+# Prefer a manifest bundled inside site/ (the Vercel deployment root only uploads files
+# under site/); fall back to the repo-root copy for local dev.
+SITE_ROOT = Path(__file__).resolve().parents[1]
+MANIFEST = next((p for p in (SITE_ROOT / "metadata" / "manifest.json",
+                             ROOT / "metadata" / "manifest.json") if p.exists()),
+                ROOT / "metadata" / "manifest.json")
 RESOLVE = f"https://huggingface.co/datasets/{HF_REPO}/resolve/main/"
 TREE = f"https://huggingface.co/datasets/{HF_REPO}/tree/main/"
 
@@ -42,6 +47,11 @@ def agency_names():
         try:
             import duckdb
             con = duckdb.connect()
+            # Vercel: only /tmp is writable, so relocate DuckDB home/extension dir there
+            # before INSTALL (mirrors data_loader.get_conn). Harmless locally.
+            if os.path.isdir("/tmp"):
+                con.execute("SET home_directory='/tmp'")
+                con.execute("SET extension_directory='/tmp/duckdb_ext'")
             con.execute("INSTALL httpfs; LOAD httpfs;")
             _AGENCY_NAMES = {}
             # full CGAC crosswalk (covers the long tail); fall back to toptier list

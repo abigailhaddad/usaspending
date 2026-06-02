@@ -35,6 +35,12 @@ def source_expr(dataset):
 
 def get_conn():
     con = duckdb.connect()
+    # On Vercel only /tmp is writable, so DuckDB's default home (~/.duckdb) can't be
+    # created and "INSTALL httpfs" fails. Point home + extension dir at /tmp before the
+    # install. Harmless locally (just relocates the extension cache to /tmp).
+    if os.path.isdir("/tmp"):
+        con.execute("SET home_directory='/tmp'")
+        con.execute("SET extension_directory='/tmp/duckdb_ext'")
     con.execute("INSTALL httpfs; LOAD httpfs;")
     if os.environ.get("CF_R2_ACCOUNT_ID"):
         con.execute(f"""

@@ -11,3 +11,5 @@ data/
 # private — not for the public mirror
 docs/PROPOSAL.md
 STATUS.md
+.vercel
+site/.vercel

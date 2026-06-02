@@ -95,7 +95,12 @@ function Panel({
   useEffect(() => {
     if (!show) return;
     let on = true; setLoading(true);
-    agg(dataset, dim, top, qs).then((d) => { if (on) { setData(d); setLoading(false); } });
+    agg(dataset, dim, top, qs).then((d) => {
+      if (!on) return;
+      // time dimensions are chronological on the x-axis; everything else stays ranked by value
+      if (dim === "fiscal_year" || dim === "month") d = [...d].sort((a, b) => a.label.localeCompare(b.label));
+      setData(d); setLoading(false);
+    });
     return () => { on = false; };
   }, [show, dataset, dim, top, qs]);
   return (

@@ -128,3 +128,80 @@
     @apply font-sans;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   USWDS look (U.S. Web Design System component styling), green primary.
+   Applied as an unlayered layer keyed on shadcn data-slots so it wins over
+   Tailwind utilities without touching page markup. Values mirror @uswds/uswds
+   (Public Sans, squared corners, dark 1px borders, thick focus outline, bold
+   labels, ruled/striped tables, usa-tag) — but the accent stays our green.
+   --------------------------------------------------------------------------- */
+:root {
+  --usw-ink: #1b1b1b;
+  --usw-border: #565c65;       /* USWDS gray-cool-50 */
+  --usw-border-light: #dfe1e2; /* USWDS gray-cool-10 */
+  --usw-primary: #2d6a4f;
+  --usw-primary-dark: #24543f;
+}
+
+/* USWDS signature: a thick focus outline on every interactive control */
+[data-slot="button"]:focus-visible,
+[data-slot="input"]:focus-visible,
+[data-slot="select-trigger"]:focus-visible,
+[data-slot="checkbox"]:focus-visible,
+[data-slot="popover-trigger"]:focus-visible,
+.usa-focusable:focus-visible,
+a:focus-visible {
+  outline: 0.25rem solid var(--usw-primary) !important;
+  outline-offset: 0;
+  box-shadow: none !important;
+}
+
+/* Buttons — bold, squared, solid fill (default already uses green --primary) */
+[data-slot="button"] { border-radius: 0.25rem; font-weight: 700; }
+
+/* Text inputs & select triggers — dark 1px border, squared, white */
+[data-slot="input"],
+[data-slot="select-trigger"] {
+  border: 1px solid var(--usw-border);
+  border-radius: 0.25rem;
+  background: #fff;
+}
+[data-slot="input"]:hover,
+[data-slot="select-trigger"]:hover { border-color: var(--usw-ink); }
+
+/* Labels & headings — USWDS weight */
+[data-slot="label"], label { font-weight: 600; }
+h1, h2, h3 { font-weight: 700; letter-spacing: -0.01em; }
+
+/* Cards — crisp border, no shadow, squared */
+[data-slot="card"] {
+  border: 1px solid var(--usw-border-light);
+  border-radius: 0.25rem;
+  box-shadow: none;
+}
+
+/* Tables — USWDS ruled header + striped rows */
+[data-slot="table"] { border-collapse: collapse; }
+[data-slot="table-head"] {
+  font-weight: 700; color: var(--usw-ink);
+  border-bottom: 2px solid var(--usw-ink);
+}
+[data-slot="table-cell"], [data-slot="table-head"] { border: 1px solid var(--usw-border-light); }
+[data-slot="table-row"]:nth-child(even) [data-slot="table-cell"] { background: #f0f0f0; }
+
+/* Badges — USWDS usa-tag */
+[data-slot="badge"] {
+  border-radius: 0.25rem;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  font-weight: 700;
+}
+
+/* Checkbox — squared with green check */
+[data-slot="checkbox"] { border-radius: 2px; border: 2px solid var(--usw-border); }
+[data-slot="checkbox"][data-state="checked"] {
+  background: var(--usw-primary);
+  border-color: var(--usw-primary);
+}

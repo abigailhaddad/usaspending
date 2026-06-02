@@ -84,21 +84,25 @@ async function agg(dataset: string, dim: string, top: number | undefined, qs: st
 }
 
 function Panel({
-  title, dataset, dim, top, qs, horizontal = true, builderDim,
-}: { title: string; dataset: string; dim: string; top?: number; qs: string; horizontal?: boolean; builderDim?: string }) {
+  title, dataset, dim, top, qs, horizontal = true, builderDim, defer = false,
+}: { title: string; dataset: string; dim: string; top?: number; qs: string; horizontal?: boolean; builderDim?: string; defer?: boolean }) {
   const [data, setData] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  // Expensive (long-string) breakdowns load only when the user asks, so opening the
+  // page doesn't fire several full-history scans at once. Cheap panels load eagerly.
+  const [show, setShow] = useState(!defer);
   const router = useRouter();
   useEffect(() => {
+    if (!show) return;
     let on = true; setLoading(true);
     agg(dataset, dim, top, qs).then((d) => { if (on) { setData(d); setLoading(false); } });
     return () => { on = false; };
-  }, [dataset, dim, top, qs]);
+  }, [show, dataset, dim, top, qs]);
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-base">{title}</CardTitle>
-        {builderDim && (
+        {builderDim && show && (
           <Button variant="ghost" size="sm"
             onClick={() => router.push(`/?dataset=${dataset}&rows=${builderDim}&metric=obligations${qs ? `&${qs}` : ""}`)}>
             open in builder →
@@ -106,7 +110,12 @@ function Panel({
         )}
       </CardHeader>
       <CardContent>
-        {loading ? <div className="h-[320px] w-full animate-pulse rounded bg-muted/60" />
+        {!show ? (
+          <div className="flex h-[320px] flex-col items-center justify-center gap-2 text-center">
+            <p className="max-w-xs text-sm text-muted-foreground">Scans the full history — takes a few seconds.</p>
+            <Button variant="outline" size="sm" onClick={() => setShow(true)}>Show {title.toLowerCase()}</Button>
+          </div>
+        ) : loading ? <div className="h-[320px] w-full animate-pulse rounded bg-muted/60" />
           : data.length === 0 ? <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">no data for these filters</div>
           : horizontal ? (
             <ResponsiveContainer width="100%" height={Math.max(320, data.length * 26)}>
@@ -149,12 +158,14 @@ function ResultsTable({ dataset, qs }: { dataset: string; qs: string }) {
   const [rows, setRows] = useState<(string | number | null)[][]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
+  const [show, setShow] = useState(false);  // disaggregated scan — load on request
   useEffect(() => {
+    if (!show) return;
     let on = true; setLoading(true);
     fetch(`/api/detail?dataset=${dataset}&limit=200${qs ? `&${qs}` : ""}`)
       .then((r) => r.json()).then((j) => { if (on) { setCols(j.columns || []); setRows(j.data || []); setLoading(false); } });
     return () => { on = false; };
-  }, [dataset, qs]);
+  }, [show, dataset, qs]);
 
   async function downloadAll() {
     setStatus("Fetching all matching records…");
@@ -175,10 +186,16 @@ function ResultsTable({ dataset, qs }: { dataset: string; qs: string }) {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">{status}</span>
-          <Button variant="outline" size="sm" onClick={downloadAll}>Download all (CSV)</Button>
+          {show && <Button variant="outline" size="sm" onClick={downloadAll}>Download all (CSV)</Button>}
         </div>
       </CardHeader>
       <CardContent>
+        {!show ? (
+          <div className="flex h-[160px] flex-col items-center justify-center gap-2 text-center">
+            <p className="max-w-md text-sm text-muted-foreground">Loads the individual award records behind the current filters (scans the full history — a few seconds).</p>
+            <Button variant="outline" size="sm" onClick={() => setShow(true)}>Load matching records</Button>
+          </div>
+        ) : (
         <div className="max-h-[520px] overflow-auto rounded-md border">
           <Table>
             <TableHeader className="sticky top-0 bg-muted">
@@ -199,6 +216,7 @@ function ResultsTable({ dataset, qs }: { dataset: string; qs: string }) {
             </TableBody>
           </Table>
         </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -276,12 +294,12 @@ export default function Explorer() {
 
       <Panel title="Obligations by fiscal year" dataset={dataset} dim="fiscal_year" qs={qs} horizontal={false} />
       <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title="Top awarding agencies" dataset={dataset} dim="awarding_agency" top={15} qs={qs} builderDim="awarding_agency" />
-        <Panel title="Top recipients" dataset={dataset} dim="recipient" top={15} qs={qs} builderDim="recipient" />
-        <Panel title="Top states" dataset={dataset} dim="state" top={15} qs={qs} builderDim="state" />
-        <Panel title="Competition" dataset={dataset} dim="extent_competed" qs={qs} builderDim="extent_competed" />
-        <Panel title="Top products & services" dataset={dataset} dim="psc_desc" top={15} qs={qs} builderDim="psc_desc" />
-        <Panel title="Top industries (NAICS)" dataset={dataset} dim="naics_desc" top={15} qs={qs} builderDim="naics_desc" />
+        <Panel title="Top awarding agencies" dataset={dataset} dim="awarding_agency" top={15} qs={qs} builderDim="awarding_agency" defer />
+        <Panel title="Top recipients" dataset={dataset} dim="recipient" top={15} qs={qs} builderDim="recipient" defer />
+        <Panel title="Top states" dataset={dataset} dim="state" top={15} qs={qs} builderDim="state" defer />
+        <Panel title="Competition" dataset={dataset} dim="extent_competed" qs={qs} builderDim="extent_competed" defer />
+        <Panel title="Top products & services" dataset={dataset} dim="psc_desc" top={15} qs={qs} builderDim="psc_desc" defer />
+        <Panel title="Top industries (NAICS)" dataset={dataset} dim="naics_desc" top={15} qs={qs} builderDim="naics_desc" defer />
       </div>
 
       <ResultsTable dataset={dataset} qs={qs} />

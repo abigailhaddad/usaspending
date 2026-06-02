@@ -156,27 +156,24 @@ function SpendingOverTime({ data }: { data: Data }) {
   return (
     <Card>
       <CardHeader className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <CardTitle className="text-base">{chartTitle}</CardTitle>
             {by !== "none" && <div className="text-xs text-muted-foreground">FY{from}–{to} · all {allItems.length} {by === "agency" ? "agencies" : "sub-agencies"}</div>}
           </div>
-          <div className="flex items-center gap-2">
-            <Toggle value={metric} onChange={setMetric} opts={[{ v: "obl", label: "Obligations" }, { v: "txn", label: "Transactions" }]} />
-            <Toggle value={asTable ? "t" : "c"} onChange={(v) => setAsTable(v === "t")} opts={[{ v: "c", label: "Graph" }, { v: "t", label: "Table" }]} />
-            <Button size="sm" variant="outline" onClick={() => downloadCSV(
-              by === "none"
-                ? [["fiscal_year", metric], ...chartData.map((d) => [d.fy as string, (d.Total as number) ?? 0])]
-                : [[by === "agency" ? "agency" : "sub_agency", ...yrs, "total"],
-                   ...allItems.map((it) => [it.key, ...yrs.map((y) => it.byYear[y] || 0), it.total])],
-              "spending_over_time.csv")}>Export</Button>
-          </div>
+          <Button size="sm" variant="outline" onClick={() => downloadCSV(
+            by === "none"
+              ? [["fiscal_year", metric], ...chartData.map((d) => [d.fy as string, (d.Total as number) ?? 0])]
+              : [[by === "agency" ? "agency" : "sub_agency", ...yrs, "total"],
+                 ...allItems.map((it) => [it.key, ...yrs.map((y) => it.byYear[y] || 0), it.total])],
+            "spending_over_time.csv")}>Export</Button>
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
           <Typeahead label="Agency" value={agency} options={agencyNames} onChange={setAgency} allLabel="All agencies" />
           <div>
             <div className="mb-1 text-sm font-medium">Disaggregate by</div>
-            <Select value={by} onValueChange={(v) => setBy((v as "none" | "agency" | "sub") ?? "none")}>
+            <Select value={by} onValueChange={(v) => setBy((v as "none" | "agency" | "sub") ?? "none")}
+              items={{ none: "Nothing (total)", agency: "Agency", sub: "Sub-agency" }}>
               <SelectTrigger className="h-9 w-48"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Nothing (total)</SelectItem>
@@ -198,6 +195,14 @@ function SpendingOverTime({ data }: { data: Data }) {
                 <SelectContent>{data.years.map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+          </div>
+          <div>
+            <div className="mb-1 text-sm font-medium">Measure</div>
+            <Toggle value={metric} onChange={setMetric} opts={[{ v: "obl", label: "Obligations" }, { v: "txn", label: "Transactions" }]} />
+          </div>
+          <div>
+            <div className="mb-1 text-sm font-medium">View</div>
+            <Toggle value={asTable ? "t" : "c"} onChange={(v) => setAsTable(v === "t")} opts={[{ v: "c", label: "Graph" }, { v: "t", label: "Table" }]} />
           </div>
         </div>
       </CardHeader>
@@ -397,7 +402,8 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
                 </Select>
               </div>
             ) : (
-              <Select value={period} onValueChange={(v) => setPeriod(v ?? "all")}>
+              <Select value={period} onValueChange={(v) => setPeriod(v ?? "all")}
+                items={{ all: "All years", ...Object.fromEntries(years.map((y) => [y, `FY ${y}`])) }}>
                 <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All years</SelectItem>

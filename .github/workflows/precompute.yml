@@ -31,7 +31,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add site/public/precomputed/*.json
+          git add site/public/precomputed
           git commit -m "Regenerate precomputed dashboard aggregates [skip ci]" || { echo "no changes"; exit 0; }
           # main may have advanced while we ran — rebase onto it before pushing
           git fetch origin main

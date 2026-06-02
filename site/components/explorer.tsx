@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  Bar, BarChart, CartesianGrid, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, LabelList, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 
 const GREEN = "#2d6a4f";
+const SERIES_COLORS = ["#2d6a4f", "#40916c", "#74c69d", "#1b4332", "#52796f", "#95d5b2", "#b08968", "#9c6644"];
 const TOP_N = 15; // breakdown bars shown (avoids a long tail of invisible ~0 bars)
 type Metric = "obl" | "txn";
 
@@ -107,42 +108,70 @@ function Toggle<T extends string>({ value, onChange, opts }: { value: T; onChang
 }
 
 function SpendingOverTime({ data }: { data: Data }) {
-  const [sub, setSub] = useState("");
+  const [by, setBy] = useState<"none" | "agency" | "sub">("none");
   const [metric, setMetric] = useState<Metric>("obl");
   const [asTable, setAsTable] = useState(false);
   const [from, setFrom] = useState(data.years[0]);
   const [to, setTo] = useState(data.years[data.years.length - 1]);
 
-  // agency is filtered at the page level (this tool's `data` is already scoped); we offer
-  // the finer sub-agency cut here, plus the fiscal-year range.
+  // Agency is filtered at the page level; here you choose what to DISAGGREGATE the trend by
+  // (nothing, agency, or sub-agency) — all from the (fy × agency × sub) cube, client-side.
   const ts = data.timeseries ?? [];
-  const subs = useMemo(() => Array.from(new Set(ts.map((r) => r.sub))).sort(), [ts]);
-
-  const rows = useMemo(() => {
-    const byYear: Record<string, number> = {};
-    for (const r of ts) {
-      if (sub && r.sub !== sub) continue;
-      if (r.fy < from || r.fy > to) continue;
-      byYear[r.fy] = (byYear[r.fy] || 0) + (metric === "obl" ? r.obl : r.txn);
-    }
-    return data.years.filter((y) => y >= from && y <= to).map((y) => ({ label: y, value: byYear[y] || 0 }));
-  }, [ts, data.years, sub, from, to, metric]);
-
   const f = fmt(metric);
+  const yrs = useMemo(() => data.years.filter((y) => y >= from && y <= to), [data.years, from, to]);
+  const { chartData, series } = useMemo(() => {
+    const val = (r: TS) => (metric === "obl" ? r.obl : r.txn);
+    const inRange = (r: TS) => r.fy >= from && r.fy <= to;
+    if (by === "none") {
+      const acc: Record<string, number> = {};
+      for (const r of ts) if (inRange(r)) acc[r.fy] = (acc[r.fy] || 0) + val(r);
+      const chartData: Record<string, string | number>[] = yrs.map((y) => ({ fy: y, Total: acc[y] || 0 }));
+      return { chartData, series: ["Total"] };
+    }
+    const keyOf = (r: TS) => (by === "agency" ? r.agency : r.sub);
+    const totals: Record<string, number> = {};
+    for (const r of ts) if (inRange(r)) totals[keyOf(r)] = (totals[keyOf(r)] || 0) + val(r);
+    const top = Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, 8).map((e) => e[0]);
+    const topSet = new Set(top);
+    const grid: Record<string, Record<string, number>> = {};
+    for (const r of ts) {
+      if (!inRange(r)) continue;
+      const k = keyOf(r); if (!topSet.has(k)) continue;
+      (grid[r.fy] ||= {})[k] = (grid[r.fy]?.[k] || 0) + val(r);
+    }
+    const chartData = yrs.map((y) => {
+      const row: Record<string, string | number> = { fy: y };
+      for (const k of top) row[k] = grid[y]?.[k] || 0;
+      return row;
+    });
+    return { chartData, series: top };
+  }, [ts, yrs, from, to, metric, by]);
+  const byLabel = by === "agency" ? ", by agency (top 8)" : by === "sub" ? ", by sub-agency (top 8)" : "";
   return (
     <Card>
       <CardHeader className="space-y-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base">{metricLabel(metric)} over time</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">{metricLabel(metric)} over time{byLabel}</CardTitle>
           <div className="flex items-center gap-2">
             <Toggle value={metric} onChange={setMetric} opts={[{ v: "obl", label: "Obligations" }, { v: "txn", label: "Transactions" }]} />
             <Toggle value={asTable ? "t" : "c"} onChange={(v) => setAsTable(v === "t")} opts={[{ v: "c", label: "Graph" }, { v: "t", label: "Table" }]} />
             <Button size="sm" variant="outline" onClick={() => downloadCSV(
-              [["fiscal_year", metric], ...rows.map((r) => [r.label, r.value])], "spending_over_time.csv")}>Export</Button>
+              [["fiscal_year", ...series], ...chartData.map((d) => [d.fy as string, ...series.map((s) => (d[s] as number) ?? 0)])],
+              "spending_over_time.csv")}>Export</Button>
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <Typeahead label="Sub-agency" value={sub} options={subs} onChange={setSub} allLabel="All sub-agencies" />
+          <div>
+            <div className="mb-1 text-sm font-medium">Disaggregate by</div>
+            <Select value={by} onValueChange={(v) => setBy((v as "none" | "agency" | "sub") ?? "none")}>
+              <SelectTrigger className="h-9 w-48"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Nothing (total)</SelectItem>
+                <SelectItem value="agency">Agency</SelectItem>
+                <SelectItem value="sub">Sub-agency</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <div>
             <div className="mb-1 text-sm font-medium">Fiscal year range</div>
             <div className="flex items-center gap-1">
@@ -161,20 +190,31 @@ function SpendingOverTime({ data }: { data: Data }) {
       </CardHeader>
       <CardContent>
         {asTable ? (
-          <div className="max-h-[360px] overflow-auto rounded border">
+          <div className="max-h-[400px] overflow-auto rounded border">
             <Table>
-              <TableHeader className="sticky top-0 bg-muted"><TableRow><TableHead>Fiscal year</TableHead><TableHead className="text-right">{metricLabel(metric)}</TableHead></TableRow></TableHeader>
-              <TableBody>{rows.map((r) => <TableRow key={r.label}><TableCell>{r.label}</TableCell><TableCell className="text-right tabular-nums">{f(r.value)}</TableCell></TableRow>)}</TableBody>
+              <TableHeader className="sticky top-0 bg-muted"><TableRow>
+                <TableHead>Fiscal year</TableHead>
+                {series.map((s) => <TableHead key={s} className="text-right">{s}</TableHead>)}
+              </TableRow></TableHeader>
+              <TableBody>{chartData.map((d) => (
+                <TableRow key={d.fy as string}>
+                  <TableCell className="font-medium">{d.fy}</TableCell>
+                  {series.map((s) => <TableCell key={s} className="text-right tabular-nums">{f((d[s] as number) || 0)}</TableCell>)}
+                </TableRow>
+              ))}</TableBody>
             </Table>
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height={320}>
-            <LineChart data={rows} margin={{ left: 12, right: 16, top: 4, bottom: 4 }}>
+          <ResponsiveContainer width="100%" height={by === "none" ? 320 : 400}>
+            <LineChart data={chartData} margin={{ left: 12, right: 16, top: 4, bottom: 4 }}>
               <CartesianGrid stroke="#eee" />
-              <XAxis dataKey="label" fontSize={12} stroke="#888" />
+              <XAxis dataKey="fy" fontSize={12} stroke="#888" />
               <YAxis tickFormatter={(v) => f(v as number)} fontSize={12} stroke="#888" width={70} />
               <Tooltip formatter={(v) => f(v as number)} />
-              <Line type="monotone" dataKey="value" stroke={GREEN} strokeWidth={2} dot={{ r: 2 }} />
+              {by !== "none" && <Legend wrapperStyle={{ fontSize: 11 }} />}
+              {series.map((s, i) => (
+                <Line key={s} type="monotone" dataKey={s} stroke={SERIES_COLORS[i % SERIES_COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         )}

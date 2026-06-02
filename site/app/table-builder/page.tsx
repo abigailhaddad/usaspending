@@ -34,6 +34,18 @@ const isoLocal = (d: Date) =>
 const parseLocal = (s: string) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 let fid = 1;
 
+// Filter dropdown values are precomputed (site/public/precomputed/{dataset}.filters.json),
+// not queried live. Cache the file per dataset.
+type FilterFile = Record<string, { options?: { value: string; label: string }[]; searchable?: boolean }>;
+const filterFileCache: Record<string, Promise<FilterFile>> = {};
+function getFilterFile(dataset: string): Promise<FilterFile> {
+  if (!filterFileCache[dataset]) {
+    filterFileCache[dataset] = fetch(`/precomputed/${dataset}.filters.json`)
+      .then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+  }
+  return filterFileCache[dataset];
+}
+
 function Step({ n, title, hint, children }: { n: number; title: string; hint?: string; children: React.ReactNode }) {
   return (
     <Card>
@@ -90,10 +102,9 @@ export default function TableBuilder() {
   }
 
   async function loadOptions(field: string): Promise<Partial<Filter>> {
-    try {
-      const j = await (await fetch(`/api/filter_options?field=${encodeURIComponent(field)}&dataset=${dataset}`)).json();
-      return j.options ? { options: j.options, searchable: false } : { options: [], searchable: true };
-    } catch { return { options: [], searchable: true }; }
+    const file = await getFilterFile(dataset);
+    const e = file[field];
+    return e?.options ? { options: e.options, searchable: false } : { options: [], searchable: true };
   }
   async function addFilter(field = "funding_subagency_code", preset: string[] = []) {
     const id = fid++;

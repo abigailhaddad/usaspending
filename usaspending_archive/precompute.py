@@ -113,7 +113,36 @@ def build(dataset, con):
     return out
 
 
+# Table Builder filter dropdowns: precompute distinct values (+ labels) for the low-card
+# filterable fields so the wizard's pickers are static, not live queries. Known high-card
+# fields are marked searchable (free-text) without scanning.
+FILTER_SKIP = {"recipient", "recipient_parent", "county", "naics", "naics_desc",
+               "psc", "psc_desc", "month", "naics_code", "psc_code"}
+
+
+def build_filters(dataset):
+    """{field: {options:[{value,label}]} | {searchable:true}} for the Table Builder."""
+    import filter_options  # from site/api (added to sys.path in main)
+    import dims as sdims
+    fields = list(sdims.DIMENSIONS.keys()) + [
+        "funding_subagency_code", "awarding_subagency_code", "naics_code", "psc_code"]
+    out = {}
+    for f in fields:
+        if f in FILTER_SKIP:
+            out[f] = {"searchable": True}
+            continue
+        try:
+            r = filter_options.build_options(f, dataset)
+            out[f] = {"options": r["options"]} if r.get("options") else {"searchable": True}
+        except Exception as e:
+            print(f"  filter {f}: {str(e)[:60]} -> searchable", flush=True)
+            out[f] = {"searchable": True}
+    return out
+
+
 def main():
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site" / "api"))
     dest = Path("site/public/precomputed")
     dest.mkdir(parents=True, exist_ok=True)
     con = connect()
@@ -124,6 +153,12 @@ def main():
         path.write_text(json.dumps(data, separators=(",", ":")))
         print(f"  wrote {path} ({path.stat().st_size/1e6:.2f} MB, "
               f"{len(data['years'])} years, {len(data['dims'])} dims)", flush=True)
+
+        filters = build_filters(dataset)
+        fpath = dest / f"{dataset}.filters.json"
+        fpath.write_text(json.dumps(filters, separators=(",", ":")))
+        n_opt = sum(1 for v in filters.values() if "options" in v)
+        print(f"  wrote {fpath} ({fpath.stat().st_size/1e6:.2f} MB, {n_opt} option lists)", flush=True)
 
 
 if __name__ == "__main__":

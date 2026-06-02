@@ -70,9 +70,21 @@ def connect():
     return con
 
 
+def build_timeseries(dataset, con):
+    """(fiscal_year × agency × subagency) → metrics. Small enough to ship whole; the
+    'spending over time' tool filters it by agency/subagency + year range in the browser."""
+    src = source(dataset)
+    rows = con.execute(
+        f"SELECT action_date_fiscal_year fy, awarding_agency_name ag, awarding_sub_agency_name sub, "
+        f"sum({OBL}) obl, count(*) txn FROM {src} "
+        f"WHERE action_date_fiscal_year IS NOT NULL GROUP BY 1, 2, 3").fetchall()
+    return [{"fy": fy, "agency": ag or "(unknown)", "sub": sub or "(unknown)",
+             "obl": obl or 0, "txn": txn} for fy, ag, sub, obl, txn in rows]
+
+
 def build(dataset, con):
     src = source(dataset)
-    out = {"trend": [], "kpis": {}, "dims": {}, "years": []}
+    out = {"trend": [], "kpis": {}, "dims": {}, "years": [], "timeseries": []}
 
     # one scan -> the year trend + per-year and all-years KPI totals
     rows = con.execute(
@@ -110,6 +122,7 @@ def build(dataset, con):
             periods[fy] = rank(d)
         out["dims"][key] = {"label": label, "categorical": categorical, "periods": periods}
 
+    out["timeseries"] = build_timeseries(dataset, con)
     return out
 
 

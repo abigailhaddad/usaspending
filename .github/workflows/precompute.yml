@@ -1,0 +1,36 @@
+name: Precompute dashboard aggregates
+
+# Generates the curated dashboard's aggregations (site/public/precomputed/*.json) from the
+# serve layer on R2, and commits them back. The site serves these statically, so the
+# dashboard never scans the full archive at request time. Slow scans run here, offline.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  precompute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q "duckdb==1.5.2"
+      - name: Generate precomputed aggregates
+        env:
+          CF_R2_ACCOUNT_ID: ${{ secrets.CF_R2_ACCOUNT_ID }}
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_BUCKET: usaspending
+          CF_R2_PREFIX: bulk-awards/
+        run: python usaspending_archive/precompute.py
+      - name: Commit precomputed JSON
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add site/public/precomputed/*.json
+          git commit -m "Regenerate precomputed dashboard aggregates [skip ci]" || { echo "no changes"; exit 0; }
+          git push

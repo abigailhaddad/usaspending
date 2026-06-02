@@ -117,7 +117,7 @@ function Panel({
       <CardContent>
         {!show ? (
           <div className="flex h-[320px] flex-col items-center justify-center gap-2 text-center">
-            <p className="max-w-xs text-sm text-muted-foreground">Scans the full history — takes a few seconds.</p>
+            <p className="max-w-xs text-sm text-muted-foreground">Aggregates across all years — load on demand.</p>
             <Button variant="outline" size="sm" onClick={() => setShow(true)}>Show {title.toLowerCase()}</Button>
           </div>
         ) : loading ? <div className="h-[320px] w-full animate-pulse rounded bg-muted/60" />
@@ -197,7 +197,7 @@ function ResultsTable({ dataset, qs }: { dataset: string; qs: string }) {
       <CardContent>
         {!show ? (
           <div className="flex h-[160px] flex-col items-center justify-center gap-2 text-center">
-            <p className="max-w-md text-sm text-muted-foreground">Loads the individual award records behind the current filters (scans the full history — a few seconds).</p>
+            <p className="max-w-md text-sm text-muted-foreground">Show the individual award records for the current view.</p>
             <Button variant="outline" size="sm" onClick={() => setShow(true)}>Load matching records</Button>
           </div>
         ) : (

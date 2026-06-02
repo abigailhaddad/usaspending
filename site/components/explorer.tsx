@@ -279,7 +279,7 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
   const [loading, setLoading] = useState(false);
   const [period, setPeriod] = useState("all");
   const [metric, setMetric] = useState<Metric>("obl");
-  const [view, setView] = useState<"chart" | "map" | "table">("chart");
+  const [view, setView] = useState<"chart" | "map" | "table">(geo ? "map" : "chart");
 
   useEffect(() => {
     if (!agency) { setAgencyDim(null); return; }

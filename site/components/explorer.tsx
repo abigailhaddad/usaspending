@@ -270,14 +270,16 @@ function StateMap({ valueByName, metric }: { valueByName: Record<string, number>
   );
 }
 
-function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, geo }: {
+function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, geo, range }: {
   title: string; dimKey: string; allDim: Dim; dataset: string; agencies: Agency[];
-  years: string[]; labelMap?: Record<string, string>; geo?: boolean;
+  years: string[]; labelMap?: Record<string, string>; geo?: boolean; range?: boolean;
 }) {
   const [agency, setAgency] = useState(""); // agency slug; "" = all agencies
   const [agencyDim, setAgencyDim] = useState<Dim | null>(null);
   const [loading, setLoading] = useState(false);
-  const [period, setPeriod] = useState("all");
+  const [period, setPeriod] = useState("all");           // single-year / all (top-N dims)
+  const [from, setFrom] = useState(years[0]);            // year-range (bounded dims)
+  const [to, setTo] = useState(years[years.length - 1]);
   const [metric, setMetric] = useState<Metric>("obl");
   const [view, setView] = useState<"chart" | "map" | "table">(geo ? "map" : "chart");
 
@@ -292,25 +294,37 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
   const dim = agency ? agencyDim : allDim;
   const label = dim?.label ?? allDim.label;
   const disp = (v: string) => (labelMap && labelMap[v]) || v;
-  const full = dim?.periods[period] || [];
+  // bounded/categorical dims sum EXACTLY across a year range (complete per-year values);
+  // top-N dims use a single year or all-years (an exact multi-year range isn't possible).
+  const full = useMemo(() => {
+    if (!range) return dim?.periods[period] || [];
+    const acc: Record<string, { obl: number; txn: number }> = {};
+    for (const y of years) {
+      if (y < from || y > to) continue;
+      for (const it of dim?.periods[y] || []) { (acc[it.label] ||= { obl: 0, txn: 0 }); acc[it.label].obl += it.obl; acc[it.label].txn += it.txn; }
+    }
+    return Object.entries(acc).map(([lbl, v]) => ({ label: lbl, obl: v.obl, txn: v.txn }));
+  }, [dim, range, period, from, to, years]);
   const truncated = full.length > TOP_N && view !== "map";
   const valueByName = useMemo(() => {
     const m: Record<string, number> = {};
     for (const i of full) m[disp(i.label)] = metric === "obl" ? i.obl : i.txn;
     return m;
-  }, [dim, period, metric, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [full, metric, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
   const items = useMemo(() => {
     const r = full.slice();
     r.sort((a, b) => (metric === "obl" ? b.obl - a.obl : b.txn - a.txn));
     return r.slice(0, TOP_N).map((i) => ({ label: disp(i.label), value: metric === "obl" ? i.obl : i.txn }));
-  }, [dim, period, metric, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [full, metric, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
   const f = fmt(metric);
-  const periodText = (period === "all" ? `All years · FY${years[0]}–${years[years.length - 1]}` : `FY ${period}`)
+  const periodText = (range
+    ? (from === years[0] && to === years[years.length - 1] ? `All years · FY${from}–${to}` : `FY${from}–${to}`)
+    : (period === "all" ? `All years · FY${years[0]}–${years[years.length - 1]}` : `FY ${period}`))
     + (agencyName ? ` · ${agencyName}` : "");
   return (
     <Card>
       <CardHeader className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <CardTitle className="text-base">
               {title}
@@ -318,25 +332,47 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
             </CardTitle>
             <div className="text-xs text-muted-foreground">{periodText}</div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={period} onValueChange={(v) => setPeriod(v ?? "all")}>
-              <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All years</SelectItem>
-                {years.slice().reverse().map((y) => <SelectItem key={y} value={y}>{`FY ${y}`}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Toggle value={metric} onChange={setMetric} opts={[{ v: "obl", label: "$" }, { v: "txn", label: "#" }]} />
+          <Button size="sm" variant="outline" onClick={() => downloadCSV(
+            [[label, metric], ...items.map((r) => [r.label, r.value])], `${title.replace(/\W+/g, "_")}.csv`)}>Export</Button>
+        </div>
+        {/* OPM-style labeled control row */}
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+          <Typeahead label="Agency" value={agencyName} options={agencies.map((a) => a.name)}
+            onChange={(name) => setAgency(name ? (agencies.find((a) => a.name === name)?.slug || "") : "")} allLabel="All agencies" />
+          <div>
+            <div className="mb-1 text-sm font-medium">{range ? "Fiscal year range" : "Fiscal year"}</div>
+            {range ? (
+              <div className="flex items-center gap-1">
+                <Select value={from} onValueChange={(v) => setFrom(v ?? from)}>
+                  <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
+                  <SelectContent>{years.map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}</SelectContent>
+                </Select>
+                <span className="text-muted-foreground">–</span>
+                <Select value={to} onValueChange={(v) => setTo(v ?? to)}>
+                  <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
+                  <SelectContent>{years.map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <Select value={period} onValueChange={(v) => setPeriod(v ?? "all")}>
+                <SelectTrigger className="h-9 w-40"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All years</SelectItem>
+                  {years.slice().reverse().map((y) => <SelectItem key={y} value={y}>{`FY ${y}`}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          <div>
+            <div className="mb-1 text-sm font-medium">Measure</div>
+            <Toggle value={metric} onChange={setMetric} opts={[{ v: "obl", label: "Obligations" }, { v: "txn", label: "Transactions" }]} />
+          </div>
+          <div>
+            <div className="mb-1 text-sm font-medium">View</div>
             <Toggle value={view} onChange={setView} opts={geo
               ? [{ v: "chart" as const, label: "Bars" }, { v: "map" as const, label: "Map" }, { v: "table" as const, label: "Table" }]
               : [{ v: "chart" as const, label: "Graph" }, { v: "table" as const, label: "Table" }]} />
-            <Button size="sm" variant="outline" onClick={() => downloadCSV(
-              [[label, metric], ...items.map((r) => [r.label, r.value])], `${title.replace(/\W+/g, "_")}.csv`)}>Export</Button>
           </div>
-        </div>
-        <div className="max-w-xs">
-          <Typeahead label="Agency" value={agencyName} options={agencies.map((a) => a.name)}
-            onChange={(name) => setAgency(name ? (agencies.find((a) => a.name === name)?.slug || "") : "")} allLabel="All agencies" />
         </div>
       </CardHeader>
       <CardContent>
@@ -468,7 +504,7 @@ export function Explorer({ dataset }: { dataset: string }) {
             {dim("psc") && <Breakdown title="Top products & services (PSC)" dimKey="psc" allDim={dim("psc")!} dataset={dataset} agencies={agencies} years={data.years} />}
             {dim("cfda") && <Breakdown title="Top programs (CFDA)" dimKey="cfda" allDim={dim("cfda")!} dataset={dataset} agencies={agencies} years={data.years} />}
             {dim("assistance_type") && <Breakdown title="Assistance type" dimKey="assistance_type" allDim={dim("assistance_type")!} dataset={dataset} agencies={agencies} years={data.years} />}
-            {dim("state") && <Breakdown title="By recipient state" dimKey="state" allDim={dim("state")!} dataset={dataset} agencies={agencies} years={data.years} labelMap={STATE_NAMES} geo />}
+            {dim("state") && <Breakdown title="By recipient state" dimKey="state" allDim={dim("state")!} dataset={dataset} agencies={agencies} years={data.years} labelMap={STATE_NAMES} geo range />}
           </Section>
 
           {(dim("competition") || dim("set_aside") || dim("business_size")) && (
@@ -476,9 +512,9 @@ export function Explorer({ dataset }: { dataset: string }) {
               q="How are awards made?"
               intro="Contracts can be competed openly or awarded without competition, and many are set aside for small or disadvantaged businesses."
             >
-              {dim("competition") && <Breakdown title="Competition" dimKey="competition" allDim={dim("competition")!} dataset={dataset} agencies={agencies} years={data.years} />}
-              {dim("set_aside") && <Breakdown title="Set-aside type" dimKey="set_aside" allDim={dim("set_aside")!} dataset={dataset} agencies={agencies} years={data.years} />}
-              {dim("business_size") && <Breakdown title="Business size" dimKey="business_size" allDim={dim("business_size")!} dataset={dataset} agencies={agencies} years={data.years} />}
+              {dim("competition") && <Breakdown title="Competition" dimKey="competition" allDim={dim("competition")!} dataset={dataset} agencies={agencies} years={data.years} range />}
+              {dim("set_aside") && <Breakdown title="Set-aside type" dimKey="set_aside" allDim={dim("set_aside")!} dataset={dataset} agencies={agencies} years={data.years} range />}
+              {dim("business_size") && <Breakdown title="Business size" dimKey="business_size" allDim={dim("business_size")!} dataset={dataset} agencies={agencies} years={data.years} range />}
             </Section>
           )}
 

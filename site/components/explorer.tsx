@@ -108,20 +108,22 @@ function Toggle<T extends string>({ value, onChange, opts }: { value: T; onChang
 }
 
 function SpendingOverTime({ data }: { data: Data }) {
+  const [agency, setAgency] = useState(""); // agency name; "" = all agencies
   const [by, setBy] = useState<"none" | "agency" | "sub">("none");
   const [metric, setMetric] = useState<Metric>("obl");
   const [asTable, setAsTable] = useState(false);
   const [from, setFrom] = useState(data.years[0]);
   const [to, setTo] = useState(data.years[data.years.length - 1]);
 
-  // Agency is filtered at the page level; here you choose what to DISAGGREGATE the trend by
-  // (nothing, agency, or sub-agency) — all from the (fy × agency × sub) cube, client-side.
+  // This tool's own filters: an agency (optional) + what to DISAGGREGATE by (nothing / agency /
+  // sub-agency) + a fiscal-year range — all from the (fy × agency × sub) cube, client-side.
   const ts = data.timeseries ?? [];
+  const agencyNames = useMemo(() => Array.from(new Set(ts.map((r) => r.agency))).sort(), [ts]);
   const f = fmt(metric);
   const yrs = useMemo(() => data.years.filter((y) => y >= from && y <= to), [data.years, from, to]);
   const { chartData, series } = useMemo(() => {
     const val = (r: TS) => (metric === "obl" ? r.obl : r.txn);
-    const inRange = (r: TS) => r.fy >= from && r.fy <= to;
+    const inRange = (r: TS) => r.fy >= from && r.fy <= to && (!agency || r.agency === agency);
     if (by === "none") {
       const acc: Record<string, number> = {};
       for (const r of ts) if (inRange(r)) acc[r.fy] = (acc[r.fy] || 0) + val(r);
@@ -145,7 +147,7 @@ function SpendingOverTime({ data }: { data: Data }) {
       return row;
     });
     return { chartData, series: top };
-  }, [ts, yrs, from, to, metric, by]);
+  }, [ts, yrs, from, to, metric, by, agency]);
   const byLabel = by === "agency" ? ", by agency (top 8)" : by === "sub" ? ", by sub-agency (top 8)" : "";
   return (
     <Card>
@@ -161,6 +163,7 @@ function SpendingOverTime({ data }: { data: Data }) {
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
+          <Typeahead label="Agency" value={agency} options={agencyNames} onChange={setAgency} allLabel="All agencies" />
           <div>
             <div className="mb-1 text-sm font-medium">Disaggregate by</div>
             <Select value={by} onValueChange={(v) => setBy((v as "none" | "agency" | "sub") ?? "none")}>
@@ -226,24 +229,49 @@ function SpendingOverTime({ data }: { data: Data }) {
   );
 }
 
-function Breakdown({ title, dim, years, labelMap }: {
-  title: string; dim: Dim; years: string[]; labelMap?: Record<string, string>;
+// per-agency precomputed file (same schema), fetched + cached on demand
+const agencyCache: Record<string, Promise<Data | null>> = {};
+function getAgencyData(dataset: string, slug: string): Promise<Data | null> {
+  const k = `${dataset}/${slug}`;
+  if (!agencyCache[k]) {
+    agencyCache[k] = fetch(`/precomputed/${dataset}/agency/${slug}.json`)
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  }
+  return agencyCache[k];
+}
+
+function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap }: {
+  title: string; dimKey: string; allDim: Dim; dataset: string; agencies: Agency[];
+  years: string[]; labelMap?: Record<string, string>;
 }) {
+  const [agency, setAgency] = useState(""); // agency slug; "" = all agencies
+  const [agencyDim, setAgencyDim] = useState<Dim | null>(null);
+  const [loading, setLoading] = useState(false);
   const [period, setPeriod] = useState("all");
   const [metric, setMetric] = useState<Metric>("obl");
   const [asTable, setAsTable] = useState(false);
+
+  useEffect(() => {
+    if (!agency) { setAgencyDim(null); return; }
+    let on = true; setLoading(true);
+    getAgencyData(dataset, agency).then((d) => { if (on) { setAgencyDim(d?.dims?.[dimKey] ?? null); setLoading(false); } });
+    return () => { on = false; };
+  }, [agency, dataset, dimKey]);
+
+  const agencyName = agencies.find((a) => a.slug === agency)?.name || "";
+  const dim = agency ? agencyDim : allDim;
+  const label = dim?.label ?? allDim.label;
   const disp = (v: string) => (labelMap && labelMap[v]) || v;
-  const full = dim.periods[period] || [];
+  const full = dim?.periods[period] || [];
   const truncated = full.length > TOP_N;
   const items = useMemo(() => {
     const r = full.slice();
     r.sort((a, b) => (metric === "obl" ? b.obl - a.obl : b.txn - a.txn));
     return r.slice(0, TOP_N).map((i) => ({ label: disp(i.label), value: metric === "obl" ? i.obl : i.txn }));
-  }, [dim, period, metric, labelMap]);
+  }, [dim, period, metric, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
   const f = fmt(metric);
-  const periodText = period === "all"
-    ? `All years · FY${years[0]}–${years[years.length - 1]}`
-    : `FY ${period}`;
+  const periodText = (period === "all" ? `All years · FY${years[0]}–${years[years.length - 1]}` : `FY ${period}`)
+    + (agencyName ? ` · ${agencyName}` : "");
   return (
     <Card>
       <CardHeader className="space-y-3">
@@ -255,7 +283,7 @@ function Breakdown({ title, dim, years, labelMap }: {
             </CardTitle>
             <div className="text-xs text-muted-foreground">{periodText}</div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={period} onValueChange={(v) => setPeriod(v ?? "all")}>
               <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -266,16 +294,21 @@ function Breakdown({ title, dim, years, labelMap }: {
             <Toggle value={metric} onChange={setMetric} opts={[{ v: "obl", label: "$" }, { v: "txn", label: "#" }]} />
             <Toggle value={asTable ? "t" : "c"} onChange={(v) => setAsTable(v === "t")} opts={[{ v: "c", label: "Graph" }, { v: "t", label: "Table" }]} />
             <Button size="sm" variant="outline" onClick={() => downloadCSV(
-              [[dim.label, metric], ...items.map((r) => [r.label, r.value])], `${title.replace(/\W+/g, "_")}.csv`)}>Export</Button>
+              [[label, metric], ...items.map((r) => [r.label, r.value])], `${title.replace(/\W+/g, "_")}.csv`)}>Export</Button>
           </div>
+        </div>
+        <div className="max-w-xs">
+          <Typeahead label="Agency" value={agencyName} options={agencies.map((a) => a.name)}
+            onChange={(name) => setAgency(name ? (agencies.find((a) => a.name === name)?.slug || "") : "")} allLabel="All agencies" />
         </div>
       </CardHeader>
       <CardContent>
-        {items.length === 0 ? <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">no data</div>
+        {loading ? <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">loading {agencyName}…</div>
+          : items.length === 0 ? <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">no data{agencyName ? ` for ${agencyName}` : ""}</div>
           : asTable ? (
             <div className="max-h-[420px] overflow-auto rounded border">
               <Table>
-                <TableHeader className="sticky top-0 bg-muted"><TableRow><TableHead>{dim.label}</TableHead><TableHead className="text-right">{metricLabel(metric)}</TableHead></TableRow></TableHeader>
+                <TableHeader className="sticky top-0 bg-muted"><TableRow><TableHead>{label}</TableHead><TableHead className="text-right">{metricLabel(metric)}</TableHead></TableRow></TableHeader>
                 <TableBody>{items.map((r) => <TableRow key={r.label}><TableCell className="whitespace-nowrap">{r.label}</TableCell><TableCell className="text-right tabular-nums">{f(r.value)}</TableCell></TableRow>)}</TableBody>
               </Table>
             </div>
@@ -327,46 +360,32 @@ function Section({ q, intro, stat, children }: {
 
 export function Explorer({ dataset }: { dataset: string }) {
   const [data, setData] = useState<Data | null>(null);
-  const [agencyList, setAgencyList] = useState<Agency[]>([]);
-  const [agency, setAgency] = useState(""); // agency slug; "" = all agencies
-
-  useEffect(() => { setAgency(""); }, [dataset]);
+  const [agencies, setAgencies] = useState<Agency[]>([]);
 
   useEffect(() => {
     setData(null);
-    const url = agency ? `/precomputed/${dataset}/agency/${agency}.json` : `/precomputed/${dataset}.json`;
-    fetch(url).then((r) => r.json()).then((d: Data) => {
-      setData(d);
-      if (!agency && d.agencies) setAgencyList(d.agencies);
+    fetch(`/precomputed/${dataset}.json`).then((r) => r.json()).then((d: Data) => {
+      setData(d); setAgencies(d.agencies || []);
     }).catch(() => setData(null));
-  }, [dataset, agency]);
+  }, [dataset]);
 
   const kpi = data?.kpis["all"];
   const isC = dataset === "contracts";
   const noun = isC ? "contract" : "assistance";
   const dim = (k: string) => data?.dims[k];
-  const agencyName = agencyList.find((a) => a.slug === agency)?.name || "";
-  const setAgencyByName = (name: string) =>
-    setAgency(name ? (agencyList.find((a) => a.name === name)?.slug || "") : "");
 
   return (
     <div className="space-y-10">
       <div className="max-w-3xl">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Federal {isC ? "Contract" : "Assistance"} Spending{agencyName ? ` — ${agencyName}` : ""}
+          Federal {isC ? "Contract" : "Assistance"} Spending
         </h1>
         <p className="mt-1 text-muted-foreground">
           Twenty years of federal {noun} awards (FY2007–2026), from the public USAspending Award Data Archive.
-          Explore the views below, or <Link href="/table-builder" className="underline hover:text-foreground">build your own query</Link> for anything else.
+          Each chart below has its own filters (agency, year, measure). Need something else?{" "}
+          <Link href="/table-builder" className="underline hover:text-foreground">Build your own query</Link>.
         </p>
       </div>
-
-      {agencyList.length > 0 && (
-        <div className="max-w-md rounded border bg-muted/30 p-3">
-          <Typeahead label="Agency" value={agencyName} options={agencyList.map((a) => a.name)} onChange={setAgencyByName} allLabel="All agencies" />
-          {agencyName && <p className="mt-2 text-xs text-muted-foreground">Every figure and chart below is limited to {agencyName}.</p>}
-        </div>
-      )}
 
       {!data || !kpi ? (
         <div className="h-96 animate-pulse rounded-xl bg-muted/50" />
@@ -395,7 +414,7 @@ export function Explorer({ dataset }: { dataset: string }) {
               q="Who receives the money?"
               intro={`A relatively small number of large organizations account for much of federal ${noun} spending. These are the top recipients.`}
             >
-              <Breakdown title="Top recipients" dim={dim("recipient")!} years={data.years} />
+              <Breakdown title="Top recipients" dimKey="recipient" allDim={dim("recipient")!} dataset={dataset} agencies={agencies} years={data.years} />
             </Section>
           )}
 
@@ -403,11 +422,13 @@ export function Explorer({ dataset }: { dataset: string }) {
             q={isC ? "What does it buy, and where?" : "What is it for, and where does it go?"}
             intro={isC
               ? "Contracts are categorized by industry (NAICS) and by the product or service bought (PSC), and tied to where the recipient is located."
-              : "Assistance is tied to where recipients are located. Use the views below to see how it is distributed."}
+              : "Assistance is categorized by program (CFDA) and type, and tied to where recipients are located."}
           >
-            {dim("naics") && <Breakdown title="Top industries (NAICS)" dim={dim("naics")!} years={data.years} />}
-            {dim("psc") && <Breakdown title="Top products & services (PSC)" dim={dim("psc")!} years={data.years} />}
-            {dim("state") && <Breakdown title="By recipient state" dim={dim("state")!} years={data.years} labelMap={STATE_NAMES} />}
+            {dim("naics") && <Breakdown title="Top industries (NAICS)" dimKey="naics" allDim={dim("naics")!} dataset={dataset} agencies={agencies} years={data.years} />}
+            {dim("psc") && <Breakdown title="Top products & services (PSC)" dimKey="psc" allDim={dim("psc")!} dataset={dataset} agencies={agencies} years={data.years} />}
+            {dim("cfda") && <Breakdown title="Top programs (CFDA)" dimKey="cfda" allDim={dim("cfda")!} dataset={dataset} agencies={agencies} years={data.years} />}
+            {dim("assistance_type") && <Breakdown title="Assistance type" dimKey="assistance_type" allDim={dim("assistance_type")!} dataset={dataset} agencies={agencies} years={data.years} />}
+            {dim("state") && <Breakdown title="By recipient state" dimKey="state" allDim={dim("state")!} dataset={dataset} agencies={agencies} years={data.years} labelMap={STATE_NAMES} />}
           </Section>
 
           {(dim("competition") || dim("set_aside") || dim("business_size")) && (
@@ -415,9 +436,9 @@ export function Explorer({ dataset }: { dataset: string }) {
               q="How are awards made?"
               intro="Contracts can be competed openly or awarded without competition, and many are set aside for small or disadvantaged businesses."
             >
-              {dim("competition") && <Breakdown title="Competition" dim={dim("competition")!} years={data.years} />}
-              {dim("set_aside") && <Breakdown title="Set-aside type" dim={dim("set_aside")!} years={data.years} />}
-              {dim("business_size") && <Breakdown title="Business size" dim={dim("business_size")!} years={data.years} />}
+              {dim("competition") && <Breakdown title="Competition" dimKey="competition" allDim={dim("competition")!} dataset={dataset} agencies={agencies} years={data.years} />}
+              {dim("set_aside") && <Breakdown title="Set-aside type" dimKey="set_aside" allDim={dim("set_aside")!} dataset={dataset} agencies={agencies} years={data.years} />}
+              {dim("business_size") && <Breakdown title="Business size" dimKey="business_size" allDim={dim("business_size")!} dataset={dataset} agencies={agencies} years={data.years} />}
             </Section>
           )}
 

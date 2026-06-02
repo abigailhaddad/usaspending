@@ -26,7 +26,7 @@ type TableResult = {
 type Filter = {
   id: number; field: string;
   options: { value: string; label: string }[] | null;
-  searchable: boolean; selected: string[]; text: string;
+  searchable: boolean; selected: string[]; text: string; q: string;
 };
 
 const isoLocal = (d: Date) =>
@@ -71,7 +71,15 @@ export default function TableBuilder() {
   const [tables, setTables] = useState<TableResult[]>([]);
   const [repro, setRepro] = useState<Repro | null>(null);
   const [status, setStatus] = useState("");
+  const [filterFields, setFilterFields] = useState<{ value: string; label: string }[]>([]);
   const loaded = useRef(false);
+
+  // which fields are filterable = the cardinality-gated keys in the precomputed file
+  useEffect(() => {
+    getFilterFile(dataset).then((file) => {
+      setFilterFields(Object.keys(file).map((k) => ({ value: k, label: FILTER_FIELDS[k] || k.replace(/_/g, " ") })));
+    });
+  }, [dataset]);
 
   function buildParams(): URLSearchParams {
     const p = new URLSearchParams();
@@ -106,9 +114,9 @@ export default function TableBuilder() {
     const e = file[field];
     return e?.options ? { options: e.options, searchable: false } : { options: [], searchable: true };
   }
-  async function addFilter(field = "funding_subagency_code", preset: string[] = []) {
+  async function addFilter(field = "awarding_agency", preset: string[] = []) {
     const id = fid++;
-    setFilters((fs) => [...fs, { id, field, options: null, searchable: false, selected: preset, text: preset.join(", ") }]);
+    setFilters((fs) => [...fs, { id, field, options: null, searchable: false, selected: preset, text: preset.join(", "), q: "" }]);
     const opt = await loadOptions(field);
     setFilters((fs) => fs.map((f) => (f.id === id ? { ...f, ...opt } : f)));
   }
@@ -232,22 +240,39 @@ export default function TableBuilder() {
             <div key={f.id} className="space-y-1.5 rounded-md border p-2">
               <Select value={f.field} onValueChange={(v) => changeFilterField(f.id, v ?? "")}>
                 <SelectTrigger className="h-8 w-full text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.entries(FILTER_FIELDS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                <SelectContent>{filterFields.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
               </Select>
               {f.options === null && <p className="text-xs text-muted-foreground">loading…</p>}
-              {f.options && f.searchable && (
-                <Input className="h-8 text-sm" placeholder="values, comma-separated" value={f.text} onChange={(e) => updateFilter(f.id, { text: e.target.value })} />
-              )}
-              {f.options && !f.searchable && (
-                <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
-                  {f.options.map((o) => (
-                    <label key={o.value} className="flex cursor-pointer items-center gap-2 text-sm">
-                      <Checkbox checked={f.selected.includes(o.value)} onCheckedChange={() => updateFilter(f.id, { selected: f.selected.includes(o.value) ? f.selected.filter((x) => x !== o.value) : [...f.selected, o.value] })} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              )}
+              {f.options && (() => {
+                const q = (f.q || "").toLowerCase();
+                const shown = q ? f.options.filter((o) => o.label.toLowerCase().includes(q)) : f.options;
+                return (
+                  <>
+                    <Input className="h-8 text-sm" placeholder={`Search ${f.options.length.toLocaleString()} values…`}
+                      value={f.q} onChange={(e) => updateFilter(f.id, { q: e.target.value })} />
+                    {f.selected.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {f.selected.map((v) => (
+                          <Badge key={v} variant="secondary" className="cursor-pointer gap-1"
+                            onClick={() => updateFilter(f.id, { selected: f.selected.filter((x) => x !== v) })}>
+                            {v} ✕
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
+                      {shown.slice(0, 200).map((o) => (
+                        <label key={o.value} className="flex cursor-pointer items-center gap-2 text-sm">
+                          <Checkbox checked={f.selected.includes(o.value)} onCheckedChange={() => updateFilter(f.id, { selected: f.selected.includes(o.value) ? f.selected.filter((x) => x !== o.value) : [...f.selected, o.value] })} />
+                          {o.label}
+                        </label>
+                      ))}
+                      {shown.length > 200 && <p className="text-xs text-muted-foreground">+{(shown.length - 200).toLocaleString()} more — keep typing to narrow</p>}
+                      {shown.length === 0 && <p className="text-xs text-muted-foreground">no match</p>}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           ))}
           <Button variant="outline" size="sm" onClick={() => addFilter()}>+ filter</Button>

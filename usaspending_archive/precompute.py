@@ -113,30 +113,52 @@ def build(dataset, con):
     return out
 
 
-# Table Builder filter dropdowns: precompute distinct values (+ labels) for the low-card
-# filterable fields so the wizard's pickers are static, not live queries. Known high-card
-# fields are marked searchable (free-text) without scanning.
-FILTER_SKIP = {"recipient", "recipient_parent", "county", "naics", "naics_desc",
-               "psc", "psc_desc", "month", "naics_code", "psc_code"}
+# Table Builder filter dropdowns are cardinality-gated: a field is filterable only if it's
+# enumerable (≤ FILTER_THRESHOLD distinct values) — then we precompute its full value list
+# (ordered by $, with labels). Fields above the threshold (recipient name/parent/UEI, etc.)
+# are simply not offered as filters in the UI; filtering by them is a Colab job. Generous
+# threshold so medium fields (NAICS ~1.3k, county ~3.2k, sub-agency ~1.5k) stay dropdowns.
+FILTER_THRESHOLD = 10000
+FILTER_HARD_SKIP = {"recipient", "recipient_parent"}  # known millions-cardinality; don't even scan
 
 
-def build_filters(dataset):
-    """{field: {options:[{value,label}]} | {searchable:true}} for the Table Builder."""
-    import filter_options  # from site/api (added to sys.path in main)
+def build_filters(dataset, con):
+    """{field: {options:[{value,label}]}} — only the enumerable (filterable) fields."""
     import dims as sdims
-    fields = list(sdims.DIMENSIONS.keys()) + [
-        "funding_subagency_code", "awarding_subagency_code", "naics_code", "psc_code"]
+    from filter_options import CODE_FIELDS
+    src = source(dataset)
+    candidates = list(sdims.DIMENSIONS.keys()) + list(CODE_FIELDS.keys()) + ["naics_code", "psc_code"]
     out = {}
-    for f in fields:
-        if f in FILTER_SKIP:
-            out[f] = {"searchable": True}
+    for f in candidates:
+        if f in FILTER_HARD_SKIP or f in out:
+            continue
+        label_col = None
+        if f in CODE_FIELDS:
+            col, label_col = CODE_FIELDS[f]
+        elif f in sdims.DIMENSIONS:
+            col = sdims.DIMENSIONS[f]["col"]
+        elif f == "naics_code":
+            col = "naics_code"
+        elif f == "psc_code":
+            col = "product_or_service_code"
+        else:
             continue
         try:
-            r = filter_options.build_options(f, dataset)
-            out[f] = {"options": r["options"]} if r.get("options") else {"searchable": True}
+            sel = f"{col} v, any_value({label_col}) l, sum({OBL}) s" if label_col else f"{col} v, sum({OBL}) s"
+            rows = con.execute(
+                f"SELECT {sel} FROM {src} WHERE {col} IS NOT NULL GROUP BY {col} "
+                f"ORDER BY s DESC LIMIT {FILTER_THRESHOLD + 1}").fetchall()
+            if len(rows) > FILTER_THRESHOLD:
+                print(f"  filter {f}: >{FILTER_THRESHOLD} distinct -> not filterable", flush=True)
+                continue
+            if label_col:
+                opts = [{"value": v, "label": f"{l} ({v})" if l else v} for v, l, _ in rows]
+            else:
+                opts = [{"value": v, "label": v} for v, _ in rows]
+            out[f] = {"options": opts}
+            print(f"  filter {f}: {len(opts)} options", flush=True)
         except Exception as e:
-            print(f"  filter {f}: {str(e)[:60]} -> searchable", flush=True)
-            out[f] = {"searchable": True}
+            print(f"  filter {f}: skip ({str(e)[:60]})", flush=True)
     return out
 
 
@@ -154,11 +176,10 @@ def main():
         print(f"  wrote {path} ({path.stat().st_size/1e6:.2f} MB, "
               f"{len(data['years'])} years, {len(data['dims'])} dims)", flush=True)
 
-        filters = build_filters(dataset)
+        filters = build_filters(dataset, con)
         fpath = dest / f"{dataset}.filters.json"
         fpath.write_text(json.dumps(filters, separators=(",", ":")))
-        n_opt = sum(1 for v in filters.values() if "options" in v)
-        print(f"  wrote {fpath} ({fpath.stat().st_size/1e6:.2f} MB, {n_opt} option lists)", flush=True)
+        print(f"  wrote {fpath} ({fpath.stat().st_size/1e6:.2f} MB, {len(filters)} filterable fields)", flush=True)
 
 
 if __name__ == "__main__":

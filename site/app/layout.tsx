@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Public_Sans, Roboto_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+// Public Sans is the U.S. federal typeface (USWDS) — the foundation of the .gov look.
+const publicSans = Public_Sans({ variable: "--font-sans", subsets: ["latin"] });
+const robotoMono = Roboto_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "USAspending Explorer (prototype)",
@@ -22,7 +23,7 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${publicSans.variable} ${robotoMono.variable} antialiased`}>
         <div className="bg-amber-100 text-amber-900 border-b border-amber-300 text-center text-sm px-4 py-2">
           <span className="font-semibold">⚠️ Prototype — do not use for analysis.</span>{" "}
           Work in progress; data and figures are not yet verified and may be incomplete or wrong.

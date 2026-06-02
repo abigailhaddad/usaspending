@@ -11,6 +11,7 @@ from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(__file__))
 import table
+from data_loader import CACHE_CONTROL
 
 
 class handler(BaseHTTPRequestHandler):
@@ -22,5 +23,6 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", CACHE_CONTROL if code == 200 else "no-store")
         self.end_headers()
         self.wfile.write(json.dumps(body, default=str).encode())

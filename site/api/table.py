@@ -28,7 +28,7 @@ def _clean(v):
 sys.path.insert(0, os.path.dirname(__file__))
 from dims import DIMENSIONS, METRICS, parse_filters, resolve_col
 import query
-from data_loader import get_conn, source_expr
+from data_loader import get_conn, source_expr, CACHE_CONTROL
 
 
 def _period(params, name):
@@ -132,5 +132,6 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", CACHE_CONTROL if code == 200 else "no-store")
         self.end_headers()
         self.wfile.write(json.dumps(body, default=str).encode())

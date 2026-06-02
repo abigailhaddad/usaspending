@@ -16,19 +16,21 @@ import table          # noqa: E402
 import filter_options  # noqa: E402
 import colab          # noqa: E402
 import downloads      # noqa: E402
+from data_loader import CACHE_CONTROL  # noqa: E402
 
 
 class H(SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
         super().__init__(*a, directory=WEB, **k)
 
-    def _json(self, fn):
+    def _json(self, fn, cache=True):
         try:
             payload = json.dumps(fn(), default=str).encode(); code = 200
         except Exception as e:
             payload = json.dumps({"error": str(e)}).encode(); code = 400
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", CACHE_CONTROL if (code == 200 and cache) else "no-store")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -52,7 +54,7 @@ class H(SimpleHTTPRequestHandler):
         if urlparse(self.path).path == "/api/colab":
             n = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(n) or b"{}")
-            return self._json(lambda: {"colab_url": colab.make_colab(body["sql"], body.get("title"))})
+            return self._json(lambda: {"colab_url": colab.make_colab(body["sql"], body.get("title"))}, cache=False)
         self.send_error(404)
 
 

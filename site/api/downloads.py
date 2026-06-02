@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dims import HF_REPO
+from data_loader import CACHE_CONTROL
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "metadata" / "manifest.json"
@@ -97,8 +98,13 @@ def build_index():
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
+        try:
+            body, code = build_index(), 200
+        except Exception as e:
+            body, code = {"error": str(e)}, 400
+        self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", CACHE_CONTROL if code == 200 else "no-store")
         self.end_headers()
-        self.wfile.write(json.dumps(build_index()).encode())
+        self.wfile.write(json.dumps(body).encode())

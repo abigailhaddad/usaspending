@@ -14,6 +14,13 @@ import duckdb
 
 import query  # for hf_source
 
+# The data is static between monthly refreshes, so identical query responses are safe to
+# cache hard. Browser 1h, CDN (Vercel edge) 1 day, serve-stale-while-revalidating a week.
+# Repeat/identical queries are then served from the edge and never re-hit the parquet —
+# which is what keeps the backend off HuggingFace's rate limiter. Only 200s carry this;
+# error responses must stay uncached so a transient 429 doesn't get pinned for a day.
+CACHE_CONTROL = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"
+
 
 def source_expr(dataset):
     tmpl = os.environ.get("USP_SOURCE_TMPL")

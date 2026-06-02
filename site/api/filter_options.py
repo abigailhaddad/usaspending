@@ -13,7 +13,7 @@ from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(__file__))
 import dims
-from data_loader import get_conn, source_expr
+from data_loader import get_conn, source_expr, CACHE_CONTROL
 
 CAP = 400
 CODED = {k for k, v in dims.DIMENSIONS.items() if v.get("coded")}
@@ -81,5 +81,6 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", CACHE_CONTROL if code == 200 else "no-store")
         self.end_headers()
         self.wfile.write(json.dumps(body).encode())

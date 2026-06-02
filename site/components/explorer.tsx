@@ -23,11 +23,13 @@ type Metric = "obl" | "txn";
 type Item = { label: string; obl: number; txn: number };
 type Dim = { label: string; categorical: boolean; periods: Record<string, Item[]> };
 type TS = { fy: string; agency: string; sub: string; obl: number; txn: number };
+type Agency = { name: string; slug: string };
 type Data = {
   years: string[];
   kpis: Record<string, { obl: number; txn: number }>;
   dims: Record<string, Dim>;
   timeseries: TS[];
+  agencies?: Agency[];
 };
 
 // US state/territory codes -> full names (the state dim stores recipient_state_code)
@@ -62,25 +64,26 @@ function downloadCSV(rows: (string | number)[][], name: string) {
   a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = name; a.click();
 }
 
-function Typeahead({ label, value, options, onChange }: {
-  label: string; value: string; options: string[]; onChange: (v: string) => void;
+function Typeahead({ label, value, options, onChange, allLabel }: {
+  label: string; value: string; options: string[]; onChange: (v: string) => void; allLabel?: string;
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const all = allLabel || `All ${label.toLowerCase()}`;
   const shown = (q ? options.filter((o) => o.toLowerCase().includes(q.toLowerCase())) : options).slice(0, 200);
   return (
     <div className="min-w-[14rem] flex-1">
       <div className="mb-1 text-sm font-medium">{label}</div>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded border bg-background px-3 text-sm hover:bg-muted">
-          <span className={value ? "" : "text-muted-foreground"}>{value || `All ${label.toLowerCase()}`}</span>
+          <span className={value ? "" : "text-muted-foreground"}>{value || all}</span>
           <span className="text-muted-foreground">▾</span>
         </PopoverTrigger>
         <PopoverContent className="w-72 p-2" align="start">
           <Input className="mb-2 h-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="max-h-64 space-y-0.5 overflow-y-auto">
             <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
-              onClick={() => { onChange(""); setOpen(false); }}>All {label.toLowerCase()}</button>
+              onClick={() => { onChange(""); setOpen(false); }}>{all}</button>
             {shown.map((o) => (
               <button key={o} className={`block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted ${o === value ? "bg-primary/10 font-medium" : ""}`}
                 onClick={() => { onChange(o); setOpen(false); }}>{o}</button>
@@ -104,28 +107,26 @@ function Toggle<T extends string>({ value, onChange, opts }: { value: T; onChang
 }
 
 function SpendingOverTime({ data }: { data: Data }) {
-  const [agency, setAgency] = useState("");
   const [sub, setSub] = useState("");
   const [metric, setMetric] = useState<Metric>("obl");
   const [asTable, setAsTable] = useState(false);
   const [from, setFrom] = useState(data.years[0]);
   const [to, setTo] = useState(data.years[data.years.length - 1]);
 
+  // agency is filtered at the page level (this tool's `data` is already scoped); we offer
+  // the finer sub-agency cut here, plus the fiscal-year range.
   const ts = data.timeseries ?? [];
-  const agencies = useMemo(() => Array.from(new Set(ts.map((r) => r.agency))).sort(), [ts]);
-  const subs = useMemo(() => Array.from(new Set(
-    ts.filter((r) => !agency || r.agency === agency).map((r) => r.sub))).sort(), [ts, agency]);
+  const subs = useMemo(() => Array.from(new Set(ts.map((r) => r.sub))).sort(), [ts]);
 
   const rows = useMemo(() => {
     const byYear: Record<string, number> = {};
     for (const r of ts) {
-      if (agency && r.agency !== agency) continue;
       if (sub && r.sub !== sub) continue;
       if (r.fy < from || r.fy > to) continue;
       byYear[r.fy] = (byYear[r.fy] || 0) + (metric === "obl" ? r.obl : r.txn);
     }
     return data.years.filter((y) => y >= from && y <= to).map((y) => ({ label: y, value: byYear[y] || 0 }));
-  }, [ts, data.years, agency, sub, from, to, metric]);
+  }, [ts, data.years, sub, from, to, metric]);
 
   const f = fmt(metric);
   return (
@@ -141,8 +142,7 @@ function SpendingOverTime({ data }: { data: Data }) {
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <Typeahead label="Agency" value={agency} options={agencies} onChange={(v) => { setAgency(v); setSub(""); }} />
-          <Typeahead label="Sub-agency" value={sub} options={subs} onChange={setSub} />
+          <Typeahead label="Sub-agency" value={sub} options={subs} onChange={setSub} allLabel="All sub-agencies" />
           <div>
             <div className="mb-1 text-sm font-medium">Fiscal year range</div>
             <div className="flex items-center gap-1">
@@ -287,27 +287,46 @@ function Section({ q, intro, stat, children }: {
 
 export function Explorer({ dataset }: { dataset: string }) {
   const [data, setData] = useState<Data | null>(null);
+  const [agencyList, setAgencyList] = useState<Agency[]>([]);
+  const [agency, setAgency] = useState(""); // agency slug; "" = all agencies
+
+  useEffect(() => { setAgency(""); }, [dataset]);
+
   useEffect(() => {
     setData(null);
-    fetch(`/precomputed/${dataset}.json`).then((r) => r.json()).then(setData).catch(() => setData(null));
-  }, [dataset]);
+    const url = agency ? `/precomputed/${dataset}/agency/${agency}.json` : `/precomputed/${dataset}.json`;
+    fetch(url).then((r) => r.json()).then((d: Data) => {
+      setData(d);
+      if (!agency && d.agencies) setAgencyList(d.agencies);
+    }).catch(() => setData(null));
+  }, [dataset, agency]);
 
   const kpi = data?.kpis["all"];
   const isC = dataset === "contracts";
   const noun = isC ? "contract" : "assistance";
   const dim = (k: string) => data?.dims[k];
+  const agencyName = agencyList.find((a) => a.slug === agency)?.name || "";
+  const setAgencyByName = (name: string) =>
+    setAgency(name ? (agencyList.find((a) => a.name === name)?.slug || "") : "");
 
   return (
     <div className="space-y-10">
       <div className="max-w-3xl">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Federal {isC ? "Contract" : "Assistance"} Spending
+          Federal {isC ? "Contract" : "Assistance"} Spending{agencyName ? ` — ${agencyName}` : ""}
         </h1>
         <p className="mt-1 text-muted-foreground">
           Twenty years of federal {noun} awards (FY2007–2026), from the public USAspending Award Data Archive.
           Explore the views below, or <Link href="/table-builder" className="underline hover:text-foreground">build your own query</Link> for anything else.
         </p>
       </div>
+
+      {agencyList.length > 0 && (
+        <div className="max-w-md rounded border bg-muted/30 p-3">
+          <Typeahead label="Agency" value={agencyName} options={agencyList.map((a) => a.name)} onChange={setAgencyByName} allLabel="All agencies" />
+          {agencyName && <p className="mt-2 text-xs text-muted-foreground">Every figure and chart below is limited to {agencyName}.</p>}
+        </div>
+      )}
 
       {!data || !kpi ? (
         <div className="h-96 animate-pulse rounded-xl bg-muted/50" />

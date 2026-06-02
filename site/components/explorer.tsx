@@ -178,6 +178,9 @@ function SpendingOverTime({ data }: { data: Data }) {
             </LineChart>
           </ResponsiveContainer>
         )}
+        <p className="mt-2 text-xs text-muted-foreground">
+          FY{data.years[data.years.length - 1]} is a partial year (still in progress) — the most recent point is incomplete and will keep rising.
+        </p>
       </CardContent>
     </Card>
   );
@@ -190,17 +193,28 @@ function Breakdown({ title, dim, years, labelMap }: {
   const [metric, setMetric] = useState<Metric>("obl");
   const [asTable, setAsTable] = useState(false);
   const disp = (v: string) => (labelMap && labelMap[v]) || v;
+  const full = dim.periods[period] || [];
+  const truncated = full.length > TOP_N;
   const items = useMemo(() => {
-    const r = (dim.periods[period] || []).slice();
+    const r = full.slice();
     r.sort((a, b) => (metric === "obl" ? b.obl - a.obl : b.txn - a.txn));
     return r.slice(0, TOP_N).map((i) => ({ label: disp(i.label), value: metric === "obl" ? i.obl : i.txn }));
   }, [dim, period, metric, labelMap]);
   const f = fmt(metric);
+  const periodText = period === "all"
+    ? `All years · FY${years[0]}–${years[years.length - 1]}`
+    : `FY ${period}`;
   return (
     <Card>
       <CardHeader className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="text-base">{title}</CardTitle>
+          <div>
+            <CardTitle className="text-base">
+              {title}
+              {truncated && <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">top {TOP_N} by {metric === "obl" ? "$" : "awards"}</span>}
+            </CardTitle>
+            <div className="text-xs text-muted-foreground">{periodText}</div>
+          </div>
           <div className="flex items-center gap-2">
             <Select value={period} onValueChange={(v) => setPeriod(v ?? "all")}>
               <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
@@ -306,7 +320,7 @@ export function Explorer({ dataset }: { dataset: string }) {
               label: `in federal ${noun} obligations over FY2007–2026 — across ${fmtNum(kpi.txn)} awards, averaging ${kpi.txn ? fmtUSD(kpi.obl / kpi.txn) : "—"} each`,
             }}
             intro={isC
-              ? "When the federal government buys goods and services — everything from fighter jets to office supplies and IT — it does so through contracts. Every prime contract award is reported to USAspending.gov; these views summarize twenty years of it."
+              ? "When the federal government buys goods and services — everything from fighter jets to office supplies and IT — it does so through contracts. Most federal prime contract awards are reported to USAspending.gov, though some classified and intelligence-community spending is excluded or withheld. These views summarize twenty years of it."
               : "Beyond buying goods and services, the government distributes money through grants, loans, direct payments, and other financial assistance — to states, organizations, and individuals. These views summarize twenty years of it."}
           />
 

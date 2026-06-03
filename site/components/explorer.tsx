@@ -374,8 +374,9 @@ function CountyMap({ valueByFips, names, metric }: { valueByFips: Record<string,
   );
 }
 
-function Breakdown({ title, dataset, agencies, years, groups }: {
+function Breakdown({ title, dataset, agencies, years, groups, kpis }: {
   title: string; dataset: string; agencies: Agency[]; years: string[]; groups: Group[];
+  kpis?: Record<string, { obl: number; txn: number }>; // grand totals per period (map-coverage denominator)
 }) {
   const [groupIdx, setGroupIdx] = useState(0);          // which "group by" option
   const g = groups[groupIdx];
@@ -385,6 +386,7 @@ function Breakdown({ title, dataset, agencies, years, groups }: {
   const allYears = !!g.allYears;
   const [agency, setAgency] = useState(""); // agency slug; "" = all agencies
   const [agencyDim, setAgencyDim] = useState<Dim | null>(null);
+  const [agencyKpis, setAgencyKpis] = useState<Record<string, { obl: number; txn: number }> | null>(null);
   const [lazyDim, setLazyDim] = useState<Dim | null>(null);            // all-agencies dim for lazy groups
   const [lazyMap, setLazyMap] = useState<Record<string, string> | undefined>(undefined);
   const [loading, setLoading] = useState(false);
@@ -396,9 +398,11 @@ function Breakdown({ title, dataset, agencies, years, groups }: {
   const period_ = allYears ? "all" : period;             // all-years-only dims ignore the year picker
 
   useEffect(() => {
-    if (!agency) { setAgencyDim(null); return; }
+    if (!agency) { setAgencyDim(null); setAgencyKpis(null); return; }
     let on = true; setLoading(true);
-    getAgencyData(dataset, agency).then((d) => { if (on) { setAgencyDim(d?.dims?.[aDimKey] ?? null); setLoading(false); } });
+    getAgencyData(dataset, agency).then((d) => {
+      if (on) { setAgencyDim(d?.dims?.[aDimKey] ?? null); setAgencyKpis(d?.kpis ?? null); setLoading(false); }
+    });
     return () => { on = false; };
   }, [agency, dataset, aDimKey]);
 
@@ -432,6 +436,20 @@ function Breakdown({ title, dataset, agencies, years, groups }: {
     }
     return Object.entries(acc).map(([lbl, v]) => ({ label: lbl, obl: v.obl, txn: v.txn }));
   }, [dim, range, period_, from, to, years]);
+  // Map coverage: share of the current selection's $ (or awards) NOT represented by a shape on
+  // the map — i.e. records with no mappable location (+ for an agency, the below-top-15 tail).
+  // Denominator is the grand total for this scope (all rows, no geo filter); numerator the mapped
+  // dim sum. Recomputes as the year range / agency / measure change, so the footnote stays honest.
+  const coverageKpis = agency ? agencyKpis : kpis;
+  const missing = useMemo(() => {
+    if (!geo || !coverageKpis) return null;
+    let total = 0;
+    if (range) { for (const y of years) if (y >= from && y <= to) total += coverageKpis[y]?.[metric] ?? 0; }
+    else total = coverageKpis[period_]?.[metric] ?? 0;
+    if (!total) return null;
+    const mapped = full.reduce((s, i) => s + (metric === "obl" ? i.obl : i.txn), 0);
+    return Math.max(0, Math.min(1, (total - mapped) / total));
+  }, [geo, coverageKpis, range, from, to, period_, years, full, metric]);
   const truncated = full.length > TOP_N && view !== "map";
   // map lookup: county is keyed on raw FIPS (matches the topojson id); state on the display
   // name (matches the topojson properties.name).
@@ -543,6 +561,14 @@ function Breakdown({ title, dataset, agencies, years, groups }: {
               </BarChart>
             </ResponsiveContainer>
           )}
+        {view === "map" && missing != null && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {missing < 0.001 ? "Under 0.1%" : `${(missing * 100).toFixed(missing < 0.1 ? 1 : 0)}%`}{" "}
+            of {metric === "obl" ? "obligations" : "awards"} in this selection {geo === "county"
+              ? "have no mappable recipient county"
+              : "have no recipient state"} and aren’t shown on the map.
+          </p>
+        )}
         {g.note && <p className="mt-2 text-xs text-muted-foreground">{g.note}</p>}
       </CardContent>
     </Card>
@@ -670,7 +696,7 @@ export function Explorer({ dataset }: { dataset: string }) {
               : "Assistance is categorized by program (CFDA) and type, and tied to where recipients are located."}
           >
             {buyGroups.length > 0 && <Breakdown title="What it buys" dataset={dataset} agencies={agencies} years={data.years} groups={buyGroups} />}
-            {whereGroups.length > 0 && <Breakdown title="Where it goes" dataset={dataset} agencies={agencies} years={data.years} groups={whereGroups} />}
+            {whereGroups.length > 0 && <Breakdown title="Where it goes" dataset={dataset} agencies={agencies} years={data.years} groups={whereGroups} kpis={data.kpis} />}
           </Section>
 
           {awardGroups.length > 0 && (

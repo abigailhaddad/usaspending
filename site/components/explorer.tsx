@@ -32,7 +32,33 @@ type Data = {
   dims: Record<string, Dim>;
   timeseries: TS[];
   agencies?: Agency[];
+  lazy_dims?: string[]; // dims served from their own {dataset}.{key}.json (e.g. "county")
 };
+
+// One "Group by" option within a Breakdown card. Each option carries its OWN capabilities:
+// a map type (geo), whether it supports a fiscal-year range, whether it's an all-years-only
+// dim (no year control), and a raw-label -> display crosswalk. So one card can mix a
+// State choropleth, a County choropleth, and a ZIP bar chart under a single toggle.
+type Group = {
+  dimKey: string;
+  allDim?: Dim;                       // all-agencies dim (absent for lazy groups; see lazyFile)
+  label: string;
+  geo?: "state" | "county";          // render a choropleth of this kind in Map view
+  range?: boolean;                    // offer an exact fiscal-year range (needs per-year periods)
+  allYears?: boolean;                 // dim is stored all-years-only; hide the year control
+  labelMap?: Record<string, string>;  // raw value -> display label (e.g. FIPS -> "County, ST")
+  note?: string;                      // caveat shown under the chart when this group is active
+  lazyFile?: string;                  // fetch /precomputed/{lazyFile}.json for this dim on demand
+};
+
+// lazily-fetched dim files ({dataset}.county.json etc.), cached across group toggles
+const lazyCache: Record<string, Promise<(Dim & { county_names?: Record<string, string> }) | null>> = {};
+function getLazyDim(file: string) {
+  if (!lazyCache[file]) {
+    lazyCache[file] = fetch(`/precomputed/${file}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  }
+  return lazyCache[file];
+}
 
 // US state/territory codes -> full names (the state dim stores recipient_state_code)
 const STATE_NAMES: Record<string, string> = {
@@ -318,22 +344,56 @@ function StateMap({ valueByName, metric }: { valueByName: Record<string, number>
   );
 }
 
-function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, geo, range, groups }: {
-  title: string; dimKey?: string; allDim?: Dim; dataset: string; agencies: Agency[];
-  years: string[]; labelMap?: Record<string, string>; geo?: boolean; range?: boolean;
-  groups?: { dimKey: string; allDim: Dim; label: string }[];
+// US county choropleth: counties colored by value, keyed on 5-digit FIPS (the topojson's
+// feature id). `names` maps FIPS -> "County, ST" for the hover label.
+function CountyMap({ valueByFips, names, metric }: { valueByFips: Record<string, number>; names: Record<string, string>; metric: Metric }) {
+  const [hover, setHover] = useState<{ name: string; value: number } | null>(null);
+  const max = Math.max(1, ...Object.values(valueByFips));
+  const f = fmt(metric);
+  const fill = (v: number) => (v ? `rgba(45,106,79,${(0.12 + 0.88 * Math.sqrt(v / max)).toFixed(3)})` : "#eef0f0");
+  return (
+    <div className="relative">
+      <ComposableMap projection="geoAlbersUsa" width={900} height={500} style={{ width: "100%", height: "auto" }}>
+        <Geographies geography="/us-counties-10m.json">
+          {({ geographies }: { geographies: { rsmKey: string; id: string; properties: { name: string } }[] }) =>
+            geographies.map((geo) => {
+              const v = valueByFips[geo.id] || 0;
+              return (
+                <Geography key={geo.rsmKey} geography={geo} fill={fill(v)} stroke="#fff" strokeWidth={0.2}
+                  onMouseEnter={() => setHover({ name: names[geo.id] || geo.properties.name, value: v })}
+                  onMouseLeave={() => setHover(null)}
+                  style={{ default: { outline: "none" }, hover: { outline: "none", fill: GREEN }, pressed: { outline: "none" } }} />
+              );
+            })}
+        </Geographies>
+      </ComposableMap>
+      <div className="absolute left-2 top-2 rounded border bg-background/90 px-2 py-1 text-sm shadow-sm">
+        {hover ? <><span className="font-medium">{hover.name}</span>: {f(hover.value)}</> : <span className="text-muted-foreground">Hover a county</span>}
+      </div>
+    </div>
+  );
+}
+
+function Breakdown({ title, dataset, agencies, years, groups }: {
+  title: string; dataset: string; agencies: Agency[]; years: string[]; groups: Group[];
 }) {
-  const [groupIdx, setGroupIdx] = useState(0);          // which "group by" option (when groups given)
-  const aDimKey = groups ? groups[groupIdx].dimKey : dimKey!;
-  const aAllDim = groups ? groups[groupIdx].allDim : allDim!;
+  const [groupIdx, setGroupIdx] = useState(0);          // which "group by" option
+  const g = groups[groupIdx];
+  const aDimKey = g.dimKey;
+  const geo = g.geo;                                     // "state" | "county" | undefined
+  const range = !!g.range;
+  const allYears = !!g.allYears;
   const [agency, setAgency] = useState(""); // agency slug; "" = all agencies
   const [agencyDim, setAgencyDim] = useState<Dim | null>(null);
+  const [lazyDim, setLazyDim] = useState<Dim | null>(null);            // all-agencies dim for lazy groups
+  const [lazyMap, setLazyMap] = useState<Record<string, string> | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [period, setPeriod] = useState("all");           // single-year / all (top-N dims)
   const [from, setFrom] = useState(years[0]);            // year-range (bounded dims)
   const [to, setTo] = useState(years[years.length - 1]);
   const [metric, setMetric] = useState<Metric>("obl");
   const [view, setView] = useState<"chart" | "map" | "table">(geo ? "map" : "chart");
+  const period_ = allYears ? "all" : period;             // all-years-only dims ignore the year picker
 
   useEffect(() => {
     if (!agency) { setAgencyDim(null); return; }
@@ -342,27 +402,44 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
     return () => { on = false; };
   }, [agency, dataset, aDimKey]);
 
+  // lazy groups (e.g. County) load their all-agencies dim + label crosswalk from a side file
+  useEffect(() => {
+    if (!g.lazyFile) { setLazyDim(null); setLazyMap(undefined); return; }
+    let on = true; setLoading(true);
+    getLazyDim(g.lazyFile).then((j) => {
+      if (!on) return;
+      setLazyDim(j ? { label: j.label, categorical: j.categorical, periods: j.periods } : null);
+      setLazyMap(j?.county_names);
+      setLoading(false);
+    });
+    return () => { on = false; };
+  }, [g.lazyFile]);
+
+  const allDim = g.lazyFile ? lazyDim : g.allDim;
+  const labelMap = g.lazyFile ? lazyMap : g.labelMap;
   const agencyName = agencies.find((a) => a.slug === agency)?.name || "";
-  const dim = agency ? agencyDim : aAllDim;
-  const label = dim?.label ?? aAllDim.label;
+  const dim = agency ? agencyDim : allDim;
+  const label = dim?.label ?? allDim?.label ?? g.label;
   const disp = (v: string) => (labelMap && labelMap[v]) || v;
   // bounded/categorical dims sum EXACTLY across a year range (complete per-year values);
   // top-N dims use a single year or all-years (an exact multi-year range isn't possible).
   const full = useMemo(() => {
-    if (!range) return dim?.periods[period] || [];
+    if (!range) return dim?.periods[period_] || [];
     const acc: Record<string, { obl: number; txn: number }> = {};
     for (const y of years) {
       if (y < from || y > to) continue;
       for (const it of dim?.periods[y] || []) { (acc[it.label] ||= { obl: 0, txn: 0 }); acc[it.label].obl += it.obl; acc[it.label].txn += it.txn; }
     }
     return Object.entries(acc).map(([lbl, v]) => ({ label: lbl, obl: v.obl, txn: v.txn }));
-  }, [dim, range, period, from, to, years]);
+  }, [dim, range, period_, from, to, years]);
   const truncated = full.length > TOP_N && view !== "map";
-  const valueByName = useMemo(() => {
+  // map lookup: county is keyed on raw FIPS (matches the topojson id); state on the display
+  // name (matches the topojson properties.name).
+  const mapValues = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const i of full) m[disp(i.label)] = metric === "obl" ? i.obl : i.txn;
+    for (const i of full) m[geo === "county" ? i.label : disp(i.label)] = metric === "obl" ? i.obl : i.txn;
     return m;
-  }, [full, metric, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [full, metric, geo, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
   const items = useMemo(() => {
     const r = full.slice();
     r.sort((a, b) => (metric === "obl" ? b.obl - a.obl : b.txn - a.txn));
@@ -371,7 +448,7 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
   const f = fmt(metric);
   const periodText = (range
     ? (from === years[0] && to === years[years.length - 1] ? `All years · FY${from}–${to}` : `FY${from}–${to}`)
-    : (period === "all" ? `All years · FY${years[0]}–${years[years.length - 1]}` : `FY ${period}`))
+    : (period_ === "all" ? `All years · FY${years[0]}–${years[years.length - 1]}` : `FY ${period_}`))
     + (agencyName ? ` · ${agencyName}` : "");
   return (
     <Card>
@@ -392,12 +469,14 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
           {groups && groups.length > 1 && (
             <div>
               <div className="mb-1 text-sm font-medium">Group by</div>
-              <Toggle value={String(groupIdx)} onChange={(v) => setGroupIdx(Number(v))}
+              {/* switching group re-scopes the view: geo dims open on the map, others on bars */}
+              <Toggle value={String(groupIdx)} onChange={(v) => { const i = Number(v); setGroupIdx(i); setView(groups[i].geo ? "map" : "chart"); }}
                 opts={groups.map((g, i) => ({ v: String(i), label: g.label }))} />
             </div>
           )}
           <Typeahead label="Agency" value={agencyName} options={agencies.map((a) => a.name)}
             onChange={(name) => setAgency(name ? (agencies.find((a) => a.name === name)?.slug || "") : "")} allLabel="All agencies" />
+          {!allYears && (
           <div>
             <div className="mb-1 text-sm font-medium">{range ? "Fiscal year range" : "Fiscal year"}</div>
             {range ? (
@@ -423,6 +502,7 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
               </Select>
             )}
           </div>
+          )}
           <div>
             <div className="mb-1 text-sm font-medium">Measure</div>
             <Toggle value={metric} onChange={setMetric} opts={[{ v: "obl", label: "Obligations" }, { v: "txn", label: "Transactions" }]} />
@@ -439,7 +519,9 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
         {loading ? <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">loading {agencyName}…</div>
           : items.length === 0 ? <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">no data{agencyName ? ` for ${agencyName}` : ""}</div>
           : view === "map" ? (
-            <StateMap valueByName={valueByName} metric={metric} />
+            geo === "county"
+              ? <CountyMap valueByFips={mapValues} names={labelMap || {}} metric={metric} />
+              : <StateMap valueByName={mapValues} metric={metric} />
           ) : view === "table" ? (
             <div className="max-h-[420px] overflow-auto rounded border">
               <Table>
@@ -461,6 +543,7 @@ function Breakdown({ title, dimKey, allDim, dataset, agencies, years, labelMap, 
               </BarChart>
             </ResponsiveContainer>
           )}
+        {g.note && <p className="mt-2 text-xs text-muted-foreground">{g.note}</p>}
       </CardContent>
     </Card>
   );
@@ -508,16 +591,32 @@ export function Explorer({ dataset }: { dataset: string }) {
   const isC = dataset === "contracts";
   const noun = isC ? "contract" : "assistance";
   const dim = (k: string) => data?.dims[k];
-  const group = (k: string, label: string) => (dim(k) ? [{ dimKey: k, allDim: dim(k)!, label }] : []);
+  const lazyDims = data?.lazy_dims || [];
+  const group = (k: string, label: string, opts: Partial<Group> = {}): Group[] =>
+    (dim(k) ? [{ dimKey: k, allDim: dim(k)!, label, ...opts }] : []);
   // group-by options per chart (only the dims actually present in the loaded data)
   const recipientGroups = [...group("recipient", "Recipient"), ...group("recipient_parent", "Parent company")];
   const buyGroups = [
     ...group("naics", "Industry (NAICS)"), ...group("psc", "Product / service (PSC)"),
     ...group("cfda", "Program (CFDA)"), ...group("assistance_type", "Assistance type"),
   ];
+  // Where: State (choropleth + year range) / County (choropleth, FIPS-keyed, lazy-loaded) / ZIP (bars).
+  // County rides in its own {dataset}.county.json (lazy) so the main page stays light; it carries
+  // full per-year periods, so it supports the same year range as State.
+  // Assistance county codes are corrupted in older archive vintages (scrambled FIPS/state/name,
+  // unrecoverable), so those records are dropped from the county view — disclosed in the note.
+  const countyNote = isC ? undefined
+    : "County detail excludes ~3% of assistance dollars — older records (mostly FY2007–2017) with corrupted county codes in the source archive that can't be reliably mapped.";
+  const whereGroups: Group[] = [
+    ...group("state", "State", { geo: "state", range: true, labelMap: STATE_NAMES }),
+    ...(lazyDims.includes("county")
+      ? [{ dimKey: "county", label: "County", geo: "county" as const, range: true, lazyFile: `${dataset}.county`, note: countyNote }]
+      : []),
+    ...group("zip", "ZIP code"),
+  ];
   const awardGroups = [
-    ...group("competition", "Competition"), ...group("set_aside", "Set-aside"),
-    ...group("business_size", "Business size"),
+    ...group("competition", "Competition", { range: true }), ...group("set_aside", "Set-aside", { range: true }),
+    ...group("business_size", "Business size", { range: true }),
   ];
 
   return (
@@ -571,7 +670,7 @@ export function Explorer({ dataset }: { dataset: string }) {
               : "Assistance is categorized by program (CFDA) and type, and tied to where recipients are located."}
           >
             {buyGroups.length > 0 && <Breakdown title="What it buys" dataset={dataset} agencies={agencies} years={data.years} groups={buyGroups} />}
-            {dim("state") && <Breakdown title="By recipient state" dimKey="state" allDim={dim("state")!} dataset={dataset} agencies={agencies} years={data.years} labelMap={STATE_NAMES} geo range />}
+            {whereGroups.length > 0 && <Breakdown title="Where it goes" dataset={dataset} agencies={agencies} years={data.years} groups={whereGroups} />}
           </Section>
 
           {awardGroups.length > 0 && (
@@ -579,7 +678,7 @@ export function Explorer({ dataset }: { dataset: string }) {
               q="How are awards made?"
               intro="Contracts can be competed openly or awarded without competition, and many are set aside for small or disadvantaged businesses."
             >
-              <Breakdown title="How awards are made" dataset={dataset} agencies={agencies} years={data.years} groups={awardGroups} range />
+              <Breakdown title="How awards are made" dataset={dataset} agencies={agencies} years={data.years} groups={awardGroups} />
             </Section>
           )}
 

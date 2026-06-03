@@ -24,6 +24,24 @@ OBL = "TRY_CAST(federal_action_obligation AS DOUBLE)"
 TOPN = 25  # high-cardinality dims keep their top N; categorical dims keep all values
 HF_REPO = "abigailhaddad/usaspending-bulk-awards"
 
+# Recipient county FIPS, cleaned to real county codes. A bare length=5 check is NOT enough:
+# the assistance feed carries ~3% of county dollars under corrupt codes that are 5 chars but
+# not real counties — float-formatted values ("423.0"), state-level placeholders ending 000
+# (e.g. "48000", often with a mismatched county name), and the "unknown" sentinel 999. We
+# require 5 digits AND a nonzero/non-999 county portion. Stored as the raw FIPS (the choropleth
+# keys on it); a FIPS -> "County, ST" crosswalk (county_names) ships alongside for display.
+# (Contracts is already clean; this is a no-op there. Same column name in both datasets.)
+COUNTY_FIPS = ("CASE WHEN regexp_matches(prime_award_transaction_recipient_county_fips_code, '^[0-9]{5}$') "
+               "AND substr(prime_award_transaction_recipient_county_fips_code, 3, 3) NOT IN ('000', '999') "
+               "THEN prime_award_transaction_recipient_county_fips_code END")
+
+# dims served from their OWN {dataset}.{key}.json, lazily fetched by the UI only when that
+# group is selected — kept out of the main file so first paint stays small. County has
+# ~3-5k values × 20 years; inlining it would add several MB to every page load. It ships as
+# a separate file (same lazy pattern as the per-agency files) and carries full per-year
+# periods, so the county view supports the same fiscal-year range as the rest of the charts.
+LAZY_DIMS = {"county"}
+
 # curated dimensions per dataset: key -> (label, sql column, categorical?)
 # categorical dims are small and kept whole; the rest are truncated to the top N by $.
 DIMS = {
@@ -33,6 +51,8 @@ DIMS = {
         "recipient":          ("Recipient",              "recipient_name",              False),
         "recipient_parent":   ("Recipient parent",       "recipient_parent_name",       False),
         "state":              ("Recipient state",        "recipient_state_code",        True),
+        "county":             ("Recipient county",       COUNTY_FIPS,                   True),
+        "zip":                ("Recipient ZIP",          "NULLIF(substr(recipient_zip_4_code, 1, 5), '')", False),
         "naics":              ("Industry (NAICS)",       "naics_description",           False),
         "psc":                ("Product/service (PSC)",  "product_or_service_code_description", False),
         "competition":        ("Competition",            "extent_competed",             True),
@@ -45,6 +65,8 @@ DIMS = {
         "recipient":          ("Recipient",              "recipient_name",              False),
         "recipient_parent":   ("Recipient parent",       "recipient_parent_name",       False),
         "state":              ("Recipient state",        "recipient_state_code",        True),
+        "county":             ("Recipient county",       COUNTY_FIPS,                   True),
+        "zip":                ("Recipient ZIP",          "NULLIF(substr(recipient_zip_code, 1, 5), '')", False),
         "assistance_type":    ("Assistance type",        "assistance_type_code",        True),
         "cfda":               ("CFDA program",           "cfda_number",                 False),
     },
@@ -87,6 +109,7 @@ def build_timeseries(dataset, con):
 def build(dataset, con):
     src = source(dataset)
     out = {"trend": [], "kpis": {}, "dims": {}, "years": [], "timeseries": []}
+    lazy = {}  # dims routed to their own file (LAZY_DIMS) instead of the main payload
 
     # one scan -> the year trend + per-year and all-years KPI totals
     rows = con.execute(
@@ -122,9 +145,34 @@ def build(dataset, con):
         periods = {"all": rank(all_period)}
         for fy, d in by_period.items():
             periods[fy] = rank(d)
-        out["dims"][key] = {"label": label, "categorical": categorical, "periods": periods}
+        entry = {"label": label, "categorical": categorical, "periods": periods}
+        if key in LAZY_DIMS:
+            lazy[key] = entry          # -> its own {dataset}.{key}.json, not the main file
+        else:
+            out["dims"][key] = entry
 
     out["timeseries"] = build_timeseries(dataset, con)
+    if "county" in lazy:
+        lazy["county"]["county_names"] = build_county_names(dataset, con)
+    out["lazy_dims"] = sorted(lazy)    # marker so the UI knows which dims to lazy-fetch
+    out["_lazy"] = lazy                # popped by the caller and written to separate files
+    return out
+
+
+def build_county_names(dataset, con):
+    """FIPS -> "County, ST" display crosswalk for the county choropleth/labels. One scan;
+    the dims store raw 5-digit FIPS (what the topojson keys on), this maps them to names."""
+    src = source(dataset)
+    rows = con.execute(
+        f"SELECT {COUNTY_FIPS} f, any_value(recipient_county_name) n, any_value(recipient_state_code) s "
+        f"FROM {src} WHERE {COUNTY_FIPS} IS NOT NULL GROUP BY 1").fetchall()
+    out = {}
+    for f, n, s in rows:
+        if not f:
+            continue
+        name = (n or "").strip().title()
+        out[f] = f"{name}, {s}" if name and s else (name or f)
+    print(f"  county crosswalk: {len(out)} FIPS", flush=True)
     return out
 
 
@@ -180,8 +228,8 @@ def build_filters(dataset, con):
 import re
 
 # dims that get a per-agency breakdown (skip the agency dims themselves — trivial within one agency)
-AGENCY_BREAKDOWN_DIMS = ("recipient", "recipient_parent", "state", "naics", "psc", "competition",
-                         "set_aside", "assistance_type", "cfda", "business_size")
+AGENCY_BREAKDOWN_DIMS = ("recipient", "recipient_parent", "state", "county", "zip", "naics", "psc",
+                         "competition", "set_aside", "assistance_type", "cfda", "business_size")
 
 
 def _slug(name):
@@ -243,6 +291,21 @@ def build_agency_files(dataset, con, timeseries, dest):
     return listing
 
 
+def write_dataset(dataset, data, dest):
+    """Write the main {dataset}.json plus one {dataset}.{key}.json per LAZY_DIMS entry
+    (popped off `data['_lazy']` so they never land in the main payload)."""
+    lazy = data.pop("_lazy", {})
+    path = dest / f"{dataset}.json"
+    path.write_text(json.dumps(data, separators=(",", ":")))
+    print(f"  wrote {path} ({path.stat().st_size/1e6:.2f} MB, {len(data['years'])} years, "
+          f"{len(data['dims'])} dims, {len(data.get('agencies', []))} agencies)", flush=True)
+    for key, payload in lazy.items():
+        lp = dest / f"{dataset}.{key}.json"
+        lp.write_text(json.dumps(payload, separators=(",", ":")))
+        print(f"  wrote {lp} ({lp.stat().st_size/1e6:.2f} MB, "
+              f"{len(payload['periods'].get('all', []))} {key})", flush=True)
+
+
 def main():
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site" / "api"))
@@ -253,10 +316,7 @@ def main():
         print(f"precomputing {dataset} …", flush=True)
         data = build(dataset, con)
         data["agencies"] = build_agency_files(dataset, con, data["timeseries"], dest)
-        path = dest / f"{dataset}.json"
-        path.write_text(json.dumps(data, separators=(",", ":")))
-        print(f"  wrote {path} ({path.stat().st_size/1e6:.2f} MB, "
-              f"{len(data['years'])} years, {len(data['dims'])} dims, {len(data['agencies'])} agencies)", flush=True)
+        write_dataset(dataset, data, dest)
 
         filters = build_filters(dataset, con)
         fpath = dest / f"{dataset}.filters.json"

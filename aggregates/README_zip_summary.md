@@ -5,18 +5,20 @@ so you can filter/download ZIP-level numbers without scanning the full ~2-billio
 
 ## Grain & columns
 
-One row per **`dataset` × `fiscal_year` × recipient ZIP5**:
+One row per **`dataset` × `fiscal_year` × `awarding_agency` × recipient ZIP5**:
 
 | column | type | notes |
 |---|---|---|
 | `dataset` | string | `contracts` or `assistance` |
 | `fiscal_year` | string | federal fiscal year, FY2007–2026 |
+| `awarding_agency` | string | awarding agency name (so you can filter by agency) |
 | `recipient_zip` | string | recipient 5-digit ZIP (first 5 of the recipient ZIP+4) |
 | `recipient_state_code` | string | recipient state (ZIP→state is effectively 1:1) |
 | `obligations` | double | sum of `federal_action_obligation` |
 | `transactions` | bigint | number of award transactions |
 
-~1.07M rows, ~55,700 distinct ZIPs.
+~3.7M rows, ~55,700 distinct ZIPs. To get a ZIP's all-agency total, sum across
+`awarding_agency` (and/or `fiscal_year`).
 
 ## Coverage caveat
 

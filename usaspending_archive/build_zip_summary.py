@@ -1,8 +1,9 @@
 """Precompute a ZIP-level spending summary so the public can filter/download by ZIP
 without aggregating 2 billion rows in real time.
 
-Grain: dataset × fiscal_year × recipient ZIP5. Columns:
-    dataset, fiscal_year, recipient_zip, recipient_state_code, obligations, transactions
+Grain: dataset × fiscal_year × awarding_agency × recipient ZIP5. Columns:
+    dataset, fiscal_year, awarding_agency, recipient_zip, recipient_state_code,
+    obligations, transactions
 
 One scan per dataset over the serve parquet; written as a single parquet via DuckDB COPY.
 Run from the repo root with CF_R2_* + CF_R2_PREFIX set:
@@ -49,11 +50,12 @@ def query(dataset):
     z = ZIP[dataset]
     return (
         f"SELECT '{dataset}' AS dataset, action_date_fiscal_year AS fiscal_year, "
+        f"  awarding_agency_name AS awarding_agency, "
         f"  {z} AS recipient_zip, any_value(recipient_state_code) AS recipient_state_code, "
         f"  sum({OBL}) AS obligations, count(*) AS transactions "
         f"FROM {source(dataset)} "
         f"WHERE {z} IS NOT NULL AND action_date_fiscal_year IS NOT NULL "
-        f"GROUP BY 1, 2, 3")
+        f"GROUP BY 1, 2, 3, 4")
 
 
 def main():
@@ -62,7 +64,7 @@ def main():
     dest.mkdir(exist_ok=True)
     out = dest / "zip_summary.parquet"
     sql = " UNION ALL ".join(query(d) for d in ("contracts", "assistance"))
-    con.execute(f"COPY ({sql} ORDER BY dataset, fiscal_year, recipient_zip) "
+    con.execute(f"COPY ({sql} ORDER BY dataset, fiscal_year, awarding_agency, recipient_zip) "
                 f"TO '{out}' (FORMAT PARQUET, COMPRESSION ZSTD)")
     n, z, mb = con.execute(
         f"SELECT count(*), count(DISTINCT recipient_zip), "

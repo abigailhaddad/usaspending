@@ -38,7 +38,23 @@ def source_expr(dataset):
     return query.hf_source(dataset)
 
 
-def get_conn():
+_REMOTE_SCHEMES = ("hf://", "r2://", "s3://", "http://", "https://")
+
+
+def _needs_httpfs(source):
+    """Whether this source is remote and so needs the httpfs extension + creds.
+    A local file source (USP_SOURCE_TMPL pointing at read_csv/parquet of a path) does
+    not — and on a cold runner `INSTALL httpfs` would require network, so skip it.
+    `source` is the resolved source_expr(); None means fall back to env detection."""
+    if source is not None:
+        return any(s in source for s in _REMOTE_SCHEMES)
+    tmpl = os.environ.get("USP_SOURCE_TMPL")
+    if tmpl:
+        return any(s in tmpl for s in _REMOTE_SCHEMES)
+    return True  # default = public HF source, or R2 via CF_R2_*
+
+
+def get_conn(source=None):
     con = duckdb.connect()
     # On Vercel only /tmp is writable, so DuckDB's default home (~/.duckdb) can't be
     # created and "INSTALL httpfs" fails. Point home + extension dir at /tmp before the
@@ -46,6 +62,8 @@ def get_conn():
     if os.path.isdir("/tmp"):
         con.execute("SET home_directory='/tmp'")
         con.execute("SET extension_directory='/tmp/duckdb_ext'")
+    if not _needs_httpfs(source):
+        return con  # local source: no extension, no network, no creds
     con.execute("INSTALL httpfs; LOAD httpfs;")
     if os.environ.get("CF_R2_ACCOUNT_ID"):
         con.execute(f"""

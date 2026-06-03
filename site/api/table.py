@@ -58,8 +58,8 @@ def build_response(params):
         group_dims = ["funding_subagency"]
     label = lambda d: DIMENSIONS[d]["label"] if d in DIMENSIONS else d.replace("_", " ")
 
-    con = get_conn()
     src = source_expr(dataset)
+    con = get_conn(src)
     two = pb is not None
     req = dict(base, rows=group_dims)
     sql, qbinds, mets, _ = query.build_multi_sql(req)
@@ -94,8 +94,9 @@ def build_response(params):
 def fields_response(params):
     """Every column in the dataset, for the 'filter/break down by anything' picker."""
     dataset = params.get("dataset", ["contracts"])[0]
-    con = get_conn()
-    cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {source_expr(dataset)}").fetchall()]
+    src = source_expr(dataset)
+    con = get_conn(src)
+    cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()]
     con.close()
     # hide the hive partition virtuals; everything else is filterable/groupable
     cols = [c for c in cols if c not in ("fiscal_year", "agency")]
@@ -113,8 +114,9 @@ def detail_response(params, limit=100000):
     if raw.isdigit():
         limit = min(int(raw), 100000)
     sql, qbinds, cols = query.build_detail_sql(req, limit)
-    con = get_conn()
-    rows = con.execute(sql.format(src=source_expr(dataset)), qbinds).fetchall()
+    src = source_expr(dataset)
+    con = get_conn(src)
+    rows = con.execute(sql.format(src=src), qbinds).fetchall()
     con.close()
     rows = [[_clean(v) for v in r] for r in rows]
     return {"columns": cols, "data": rows, "count": len(rows),

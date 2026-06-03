@@ -8,6 +8,9 @@ data/
 *.csv
 *.parquet
 
+# but DO track the tiny committed test fixtures (the integration suite reads these)
+!tests/fixtures/**/*.csv
+
 # private — not for the public mirror
 docs/PROPOSAL.md
 STATUS.md

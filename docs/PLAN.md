@@ -13,7 +13,8 @@ and usajobs_historical keeps the BI site in `web/`:
 ```
 usaspending/
 ├── usaspending_archive/      # fetch → normalize → parquet → R2 + HF publish pipeline
-├── web/                      # Vercel BI site (R2-backed, usajobs_historical-shaped)
+├── site/                     # Next.js Vercel BI site (shipped as `site/`, not the
+│                             #   originally-planned `web/` — see Phase 5 note below)
 ├── demo.ipynb                # Colab demo (OPM-shaped)
 ├── metadata/                 # manifest.json (change detection)
 ├── docs/                     # FINDINGS.md, PLAN.md
@@ -183,6 +184,12 @@ Raw-layer fate (keep on HF vs serving-only): **decided after backfill.**
 
 **Goal:** usajobs_historical-style filter/table UI, **but with a much deeper aggregation
 layer** — USAspending's value is in slicing spend across many dimensions, not just a flat table.
+
+> **Shipped as `site/` (Next.js), not the `web/` layout planned below.** The charts read
+> static precomputed JSON (`usaspending_archive/precompute.py` → `site/public/precomputed/`)
+> instead of live R2/DuckDB queries; `web/api/columns.py` became `site/api/dims.py` (the pivot
+> registry) and `web/api/aggregate.py` split into `site/api/query.py` + `site/api/table.py`.
+> The original plan is kept below for context.
 
 Base (port from `usajobs_historical/web/`): Vercel Python serverless funcs querying R2
 parquet via DuckDB; DataTables server-side pagination; shareable filter URLs; CSV export;

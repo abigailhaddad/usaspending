@@ -1,5 +1,13 @@
 # BI site design — table builder + prebuilt viz (Phase 5)
 
+> **Status note (as-built).** The shipped site lives in `site/` (Next.js). The
+> **period-over-period (A vs B) comparison** described throughout this doc is
+> implemented in the API layer (`site/api/query.py` `build_sql`/`build_multi_sql`
+> accept `periodB`, and `table.py` returns the `__a`/`__b` columns) but is **not
+> currently surfaced in the UI** — the landing page was simplified to a single
+> timeframe. Treat the A/B/Δ/%Δ sections below as the API contract + intended UX,
+> not the current front end.
+
 ## Premise
 
 USAspending.gov is a **lookup** tool (retrieve a vendor's/award's records). Ours inverts

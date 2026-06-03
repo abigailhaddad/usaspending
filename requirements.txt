@@ -2,3 +2,5 @@ requests
 duckdb>=1.0
 huggingface_hub
 boto3
+pyarrow      # codebook.py / reference_data.py build parquet schemas
+pandas       # table.py reads DuckDB results via .df()

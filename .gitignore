@@ -13,3 +13,6 @@ docs/PROPOSAL.md
 STATUS.md
 .vercel
 site/.vercel
+
+# ZIP/aggregate build artifacts (published to HF, not tracked in git)
+aggregates/*.parquet

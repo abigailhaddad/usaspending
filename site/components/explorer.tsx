@@ -508,6 +508,17 @@ export function Explorer({ dataset }: { dataset: string }) {
   const isC = dataset === "contracts";
   const noun = isC ? "contract" : "assistance";
   const dim = (k: string) => data?.dims[k];
+  const group = (k: string, label: string) => (dim(k) ? [{ dimKey: k, allDim: dim(k)!, label }] : []);
+  // group-by options per chart (only the dims actually present in the loaded data)
+  const recipientGroups = [...group("recipient", "Recipient"), ...group("recipient_parent", "Parent company")];
+  const buyGroups = [
+    ...group("naics", "Industry (NAICS)"), ...group("psc", "Product / service (PSC)"),
+    ...group("cfda", "Program (CFDA)"), ...group("assistance_type", "Assistance type"),
+  ];
+  const awardGroups = [
+    ...group("competition", "Competition"), ...group("set_aside", "Set-aside"),
+    ...group("business_size", "Business size"),
+  ];
 
   return (
     <div className="space-y-10">
@@ -549,11 +560,7 @@ export function Explorer({ dataset }: { dataset: string }) {
               q="Who receives the money?"
               intro={`A relatively small number of large organizations account for much of federal ${noun} spending. Group by "Recipient" for the specific entity on each award, or "Parent company" to roll subsidiaries and name variants up to the corporate family (via SAM.gov parent UEI) — e.g. Lockheed's units combined.`}
             >
-              <Breakdown title="Largest recipients" dataset={dataset} agencies={agencies} years={data.years}
-                groups={[
-                  { dimKey: "recipient", allDim: dim("recipient")!, label: "Recipient" },
-                  ...(dim("recipient_parent") ? [{ dimKey: "recipient_parent", allDim: dim("recipient_parent")!, label: "Parent company" }] : []),
-                ]} />
+              <Breakdown title="Largest recipients" dataset={dataset} agencies={agencies} years={data.years} groups={recipientGroups} />
             </Section>
           )}
 
@@ -563,21 +570,16 @@ export function Explorer({ dataset }: { dataset: string }) {
               ? "Contracts are categorized by industry (NAICS) and by the product or service bought (PSC), and tied to where the recipient is located."
               : "Assistance is categorized by program (CFDA) and type, and tied to where recipients are located."}
           >
-            {dim("naics") && <Breakdown title="Top industries (NAICS)" dimKey="naics" allDim={dim("naics")!} dataset={dataset} agencies={agencies} years={data.years} />}
-            {dim("psc") && <Breakdown title="Top products & services (PSC)" dimKey="psc" allDim={dim("psc")!} dataset={dataset} agencies={agencies} years={data.years} />}
-            {dim("cfda") && <Breakdown title="Top programs (CFDA)" dimKey="cfda" allDim={dim("cfda")!} dataset={dataset} agencies={agencies} years={data.years} />}
-            {dim("assistance_type") && <Breakdown title="Assistance type" dimKey="assistance_type" allDim={dim("assistance_type")!} dataset={dataset} agencies={agencies} years={data.years} />}
+            {buyGroups.length > 0 && <Breakdown title="What it buys" dataset={dataset} agencies={agencies} years={data.years} groups={buyGroups} />}
             {dim("state") && <Breakdown title="By recipient state" dimKey="state" allDim={dim("state")!} dataset={dataset} agencies={agencies} years={data.years} labelMap={STATE_NAMES} geo range />}
           </Section>
 
-          {(dim("competition") || dim("set_aside") || dim("business_size")) && (
+          {awardGroups.length > 0 && (
             <Section
               q="How are awards made?"
               intro="Contracts can be competed openly or awarded without competition, and many are set aside for small or disadvantaged businesses."
             >
-              {dim("competition") && <Breakdown title="Competition" dimKey="competition" allDim={dim("competition")!} dataset={dataset} agencies={agencies} years={data.years} range />}
-              {dim("set_aside") && <Breakdown title="Set-aside type" dimKey="set_aside" allDim={dim("set_aside")!} dataset={dataset} agencies={agencies} years={data.years} range />}
-              {dim("business_size") && <Breakdown title="Business size" dimKey="business_size" allDim={dim("business_size")!} dataset={dataset} agencies={agencies} years={data.years} range />}
+              <Breakdown title="How awards are made" dataset={dataset} agencies={agencies} years={data.years} groups={awardGroups} range />
             </Section>
           )}
 

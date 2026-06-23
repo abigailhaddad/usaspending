@@ -91,8 +91,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Backfill drained — triggering serve rebuild."
-          gh workflow run rebuild.yml --ref "${{ github.ref_name }}" -f product=both
+          # Only recompact the years a monthly update can touch (current + prior FY),
+          # NOT all ~20 — recompacting everything wastes time and risks HF throttling.
+          Y=$(date -u +%Y); M=$(date -u +%m); FY=$Y; [ "$M" -ge 10 ] && FY=$((Y + 1))
+          YEARS="$((FY - 1)),$FY"
+          echo "Backfill drained — rebuilding serve layer for years $YEARS."
+          gh workflow run rebuild.yml --ref "${{ github.ref_name }}" -f product=both -f years="$YEARS"
 
       - name: Summary
         if: always()

@@ -20,7 +20,9 @@ on:
         required: false
         default: ""
   schedule:
-    - cron: "0 9 * * 1"  # Mondays — source re-publishes ~monthly
+    # Mondays — source re-publishes ~monthly. Deliberately an odd minute, not :00:
+    # GitHub drops/delays scheduled runs most at the top of the hour.
+    - cron: "23 9 * * 1"
 
 permissions:
   contents: write   # commit the updated manifest

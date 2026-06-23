@@ -80,6 +80,18 @@ jobs:
             -f agency="${{ github.event.inputs.agency }}" \
             -f product="${{ github.event.inputs.product }}"
 
+      # When the backfill is fully drained (no more files to chain), recompact the
+      # serve layer + publish. Without this the raw layer advances but the serve
+      # files everyone queries go stale. (May redundantly rebuild on a no-new-data
+      # run — that's idempotent and cheap insurance against a stale serve layer.)
+      - name: Rebuild serve layer when drain is complete
+        if: always() && steps.run.outputs.chain == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Backfill drained — triggering serve rebuild."
+          gh workflow run rebuild.yml --ref "${{ github.ref_name }}" -f product=both
+
       - name: Summary
         if: always()
         run: |

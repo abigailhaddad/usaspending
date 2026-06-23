@@ -91,11 +91,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Only recompact the years a monthly update can touch (current + prior FY),
+          # Recompact current + prior FY (what a monthly update normally touches),
           # NOT all ~20 — recompacting everything wastes time and risks HF throttling.
+          # PLUS one rotating older year per ISO week, so historical restatements get
+          # caught too — the whole back-catalog gets re-audited over ~a quarter.
           Y=$(date -u +%Y); M=$(date -u +%m); FY=$Y; [ "$M" -ge 10 ] && FY=$((Y + 1))
-          YEARS="$((FY - 1)),$FY"
-          echo "Backfill drained — rebuilding serve layer for years $YEARS."
+          PREV=$((FY - 1)); FIRST=2008
+          YEARS="$PREV,$FY"
+          SPAN=$((PREV - FIRST))
+          if [ "$SPAN" -gt 0 ]; then
+            WEEK=$((10#$(date -u +%V)))      # ISO week, strip leading zero
+            ROT=$((FIRST + WEEK % SPAN))     # cycles 2008..PREV-1
+            YEARS="$ROT,$YEARS"
+          fi
+          echo "Backfill drained — rebuilding serve for years $YEARS (current+prior + rotating audit)."
           gh workflow run rebuild.yml --ref "${{ github.ref_name }}" -f product=both -f years="$YEARS"
 
       - name: Summary

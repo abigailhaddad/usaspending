@@ -86,6 +86,13 @@ def connect():
     if os.path.isdir("/tmp"):
         con.execute("SET home_directory='/tmp'")
     con.execute("INSTALL httpfs; LOAD httpfs;")
+    # Resilience: precompute reads ~20 years of serve files over R2/HF, so a single
+    # transient timeout shouldn't kill the whole run. Retry with backoff + a generous
+    # per-request ceiling instead of failing fast.
+    con.execute("SET http_timeout=300000")        # ms
+    con.execute("SET http_retries=5")
+    con.execute("SET http_retry_wait_ms=500")
+    con.execute("SET http_retry_backoff=2")
     if os.environ.get("CF_R2_ACCOUNT_ID"):
         con.execute(f"""CREATE SECRET r2 (TYPE r2, KEY_ID '{os.environ['CF_R2_ACCESS_KEY_ID']}',
             SECRET '{os.environ['CF_R2_SECRET_ACCESS_KEY']}', ACCOUNT_ID '{os.environ['CF_R2_ACCOUNT_ID']}')""")

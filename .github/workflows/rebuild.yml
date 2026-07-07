@@ -1,44 +1,78 @@
 name: Rebuild downstream (serve → R2 → precompute)
 
-# One pipeline to run after new raw data lands (replaces the separate compact / sync_r2 /
-# precompute workflows). Jobs run in order via `needs`; data passes between them through
-# HuggingFace + R2, not job artifacts:
-#   1. compact     — per-agency raw files → one parquet per (product, fiscal year) on HF (serve/)
-#   2. sync_r2     — copy serve/ from HF into Cloudflare R2 (the site's query backend)
-#   3. precompute  — read the serve layer from R2, regenerate the dashboard JSON, commit it
+# Runs after new raw data lands. Jobs pass data through HuggingFace + R2, not artifacts:
+#   1. plan       — decide which (product, year) shards to compact (default: newest 2 FYs)
+#   2. compact    — one PARALLEL job per shard: per-agency raw → serve/{product}/{fy}.parquet on HF
+#   3. sync_r2    — copy serve/ from HF into Cloudflare R2 (the site's query backend)
+#   4. precompute — read the serve layer from R2, regenerate the dashboard JSON, commit it
+#
+# Why sharded: a full 20-year × 2-product rebuild is ~40 groups and re-copies immutable
+# history every run — that's what blew past the 6-hour job limit. Old years never change,
+# so routine runs only recompact the newest FYs; a full backfill (years=all) fans out as
+# many short parallel jobs (wall-clock ≈ the slowest single year, not the sum).
 
 on:
   workflow_dispatch:
     inputs:
       product:
-        description: "contracts | assistance | both (compaction)"
+        description: "contracts | assistance | both"
         default: "both"
       years:
-        description: "comma-separated fiscal years, or blank for all present"
-        default: ""
+        description: "recent (newest 2 FYs) | all | comma-separated FYs"
+        default: "recent"
+  # Chain automatically off the weekly ingestion — when new raw data lands, rebuild the
+  # serve layer without anyone kicking it by hand.
+  workflow_run:
+    workflows: ["Backfill / refresh HF dataset"]
+    types: [completed]
 
 permissions:
   contents: write
 
+concurrency:
+  group: urgency-downstream
+  cancel-in-progress: false
+
 jobs:
-  compact:
+  plan:
+    # On the chained trigger, only proceed if the ingestion actually succeeded.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+      empty: ${{ steps.gen.outputs.empty }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Plan compaction shards
+        id: gen
+        env:
+          # workflow_run/schedule carry no inputs → defaults (both / recent) apply.
+          PRODUCT: ${{ github.event.inputs.product || 'both' }}
+          YEARS: ${{ github.event.inputs.years || 'recent' }}
+        run: python -m usaspending_archive.plan_compact
+
+  compact:
+    needs: plan
+    if: ${{ needs.plan.outputs.empty != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90          # generous per-shard; a single year is minutes
+    strategy:
+      fail-fast: false           # one bad year shouldn't kill the rest
+      max-parallel: 6            # keep HF uploads well under any rate limit
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -q duckdb huggingface_hub
-      - name: Compact raw files into the serve layer (HF)
+      - name: Compact ${{ matrix.product }} ${{ matrix.year }} → serve layer (HF)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          ARGS=""
-          P="${{ github.event.inputs.product }}"
-          [ -n "$P" ] && [ "$P" != "both" ] && ARGS="--product $P"
-          [ -n "${{ github.event.inputs.years }}" ] && ARGS="$ARGS --years ${{ github.event.inputs.years }}"
-          python -m usaspending_archive.compact_serve $ARGS
+        run: python -m usaspending_archive.compact_serve --product ${{ matrix.product }} --years ${{ matrix.year }}
 
   sync_r2:
     needs: compact

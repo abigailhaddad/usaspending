@@ -77,6 +77,10 @@ jobs:
   sync_r2:
     needs: compact
     runs-on: ubuntu-latest
+    # huggingface_hub's snapshot_download has no overall timeout — an occasional stalled
+    # connection can otherwise hang the job for hours (observed: stuck 88+ min after
+    # finishing 11/40 files). Bound it so a stall fails fast and visibly instead.
+    timeout-minutes: 30
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -109,6 +113,7 @@ jobs:
   precompute:
     needs: sync_r2
     runs-on: ubuntu-latest
+    timeout-minutes: 45   # historical baseline ~22 min; bound it for the same reason as sync_r2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

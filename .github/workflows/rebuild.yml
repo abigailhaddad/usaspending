@@ -77,10 +77,11 @@ jobs:
   sync_r2:
     needs: compact
     runs-on: ubuntu-latest
-    # huggingface_hub's snapshot_download has no overall timeout — an occasional stalled
-    # connection can otherwise hang the job for hours (observed: stuck 88+ min after
-    # finishing 11/40 files). Bound it so a stall fails fast and visibly instead.
-    timeout-minutes: 30
+    # huggingface_hub's snapshot_download has no overall timeout — a single stalled
+    # connection can hang the job for hours (observed twice: 88+ min once, hit this
+    # 30-min guard once more). The per-request timeout + retry below is the real fix;
+    # this stays as a backstop in case all retries still stall.
+    timeout-minutes: 45
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -88,14 +89,30 @@ jobs:
       - name: Download serve layer from HuggingFace
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          # Bounds each HTTP request (connect/read) so a stalled connection raises instead
+          # of hanging indefinitely — the retry loop below then just resumes (snapshot_
+          # download skips files already fully fetched).
+          HF_HUB_DOWNLOAD_TIMEOUT: "60"
         run: |
           pip install -q "huggingface_hub>=0.25"
           python - <<'PY'
           import os
+          import time
           from huggingface_hub import snapshot_download
-          snapshot_download("abigailhaddad/usaspending-bulk-awards", repo_type="dataset",
-                            allow_patterns="serve/**", local_dir="hf_serve",
-                            token=os.environ["HF_TOKEN"])
+
+          last_err = None
+          for attempt in range(1, 4):
+              try:
+                  snapshot_download("abigailhaddad/usaspending-bulk-awards", repo_type="dataset",
+                                    allow_patterns="serve/**", local_dir="hf_serve",
+                                    token=os.environ["HF_TOKEN"])
+                  break
+              except Exception as e:
+                  last_err = e
+                  print(f"attempt {attempt}/3 failed ({e}); retrying...")
+                  time.sleep(15)
+          else:
+              raise SystemExit(f"download failed after 3 attempts: {last_err}")
           PY
           du -sh hf_serve/serve
       - name: Upload serve layer to R2

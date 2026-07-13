@@ -39,7 +39,15 @@ def main() -> int:
     ap.add_argument("--max-files", type=int, default=200)
     ap.add_argument("--agency", default=None)
     ap.add_argument("--product", choices=["Contracts", "Assistance"], default=None)
+    ap.add_argument("--fiscal-years", default=None,
+                    help="Comma-separated FYs to limit to, e.g. '2025,2026' "
+                         "(blank = all changed years). Bounds a re-ingest when the "
+                         "source restates ETags across the whole back-catalog.")
     args = ap.parse_args()
+
+    fy_filter = None
+    if args.fiscal_years:
+        fy_filter = {y.strip() for y in args.fiscal_years.split(",") if y.strip()}
 
     from huggingface_hub import HfApi
     api = HfApi(token=os.environ["HF_TOKEN"])
@@ -52,6 +60,8 @@ def main() -> int:
         todo = [f for f in todo if f.agency_code == args.agency]
     if args.product:
         todo = [f for f in todo if f.award_type == args.product]
+    if fy_filter:
+        todo = [f for f in todo if f.fiscal_year in fy_filter]
     # newest fiscal years first — recent spending is what most analyses want
     todo.sort(key=lambda f: f.fiscal_year, reverse=True)
     total_todo = len(todo)

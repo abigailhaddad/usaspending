@@ -19,6 +19,10 @@ on:
         description: "Contracts | Assistance | blank (both)"
         required: false
         default: ""
+      fiscal_years:
+        description: "Limit to these FYs, e.g. '2025,2026' (blank = all changed years)"
+        required: false
+        default: ""
   schedule:
     # Mondays — source re-publishes ~monthly. Deliberately an odd minute, not :00:
     # GitHub drops/delays scheduled runs most at the top of the hour.
@@ -52,6 +56,7 @@ jobs:
           ARG=""; [ -n "$MAX" ] && [ "$MAX" != "0" ] && ARG="--max-files $MAX"
           [ -n "${{ github.event.inputs.agency }}" ] && ARG="$ARG --agency ${{ github.event.inputs.agency }}"
           [ -n "${{ github.event.inputs.product }}" ] && ARG="$ARG --product ${{ github.event.inputs.product }}"
+          [ -n "${{ github.event.inputs.fiscal_years }}" ] && ARG="$ARG --fiscal-years ${{ github.event.inputs.fiscal_years }}"
           python -m usaspending_archive.backfill $ARG | tee run.log
           grep -q CHAIN_NEEDED run.log && echo "chain=true" >> "$GITHUB_OUTPUT" || echo "chain=false" >> "$GITHUB_OUTPUT"
 
@@ -84,7 +89,8 @@ jobs:
             if gh workflow run refresh.yml --ref "${{ github.ref_name }}" \
                  -f max_files="${{ github.event.inputs.max_files }}" \
                  -f agency="${{ github.event.inputs.agency }}" \
-                 -f product="${{ github.event.inputs.product }}"; then
+                 -f product="${{ github.event.inputs.product }}" \
+                 -f fiscal_years="${{ github.event.inputs.fiscal_years }}"; then
               echo "chained next run (attempt $i)"; exit 0
             fi
             echo "dispatch failed, retry $i"; sleep $((RANDOM % 8 + 7))

@@ -77,10 +77,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run refresh.yml --ref "${{ github.ref_name }}" \
-            -f max_files="${{ github.event.inputs.max_files }}" \
-            -f agency="${{ github.event.inputs.agency }}" \
-            -f product="${{ github.event.inputs.product }}"
+          # The dispatch API 500s transiently; a single failure here silently
+          # strands the drain (files remain, but nothing is queued to continue).
+          # Retry with backoff before giving up, and fail loudly if we can't.
+          for i in 1 2 3 4 5 6; do
+            if gh workflow run refresh.yml --ref "${{ github.ref_name }}" \
+                 -f max_files="${{ github.event.inputs.max_files }}" \
+                 -f agency="${{ github.event.inputs.agency }}" \
+                 -f product="${{ github.event.inputs.product }}"; then
+              echo "chained next run (attempt $i)"; exit 0
+            fi
+            echo "dispatch failed, retry $i"; sleep $((RANDOM % 8 + 7))
+          done
+          echo "::error::could not chain next backfill run after 6 attempts — drain is stranded, re-dispatch refresh.yml manually"
+          exit 1
 
       # When the backfill is fully drained (no more files to chain), recompact the
       # serve layer + publish. Without this the raw layer advances but the serve

@@ -34,20 +34,37 @@ MANIFEST = ROOT / "metadata" / "manifest.json"
 HF_REPO = os.environ.get("HF_REPO", "abigailhaddad/usaspending-bulk-awards")
 
 
+def _default_fiscal_years() -> set[str]:
+    """Current + prior federal fiscal year (Oct-Sep). Mirrors rebuild.yml's FY math:
+    a monthly source refresh only meaningfully restates these two years."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    fy = now.year + 1 if now.month >= 10 else now.year
+    return {str(fy), str(fy - 1)}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-files", type=int, default=200)
     ap.add_argument("--agency", default=None)
     ap.add_argument("--product", choices=["Contracts", "Assistance"], default=None)
     ap.add_argument("--fiscal-years", default=None,
-                    help="Comma-separated FYs to limit to, e.g. '2025,2026' "
-                         "(blank = all changed years). Bounds a re-ingest when the "
-                         "source restates ETags across the whole back-catalog.")
+                    help="Comma-separated FYs to limit to, e.g. '2025,2026'. "
+                         "Blank = current + prior fiscal year (the normal refresh "
+                         "window). Pass 'all' for a full-catalog re-ingest, e.g. when "
+                         "the source restates ETags across every year.")
     args = ap.parse_args()
 
-    fy_filter = None
-    if args.fiscal_years:
+    # Blank -> current + prior FY (what a monthly source refresh actually restates);
+    # 'all' -> no filter. Bounding here stops a source-wide ETag shuffle from
+    # dragging the whole back-catalog through a re-ingest.
+    if args.fiscal_years and args.fiscal_years.strip().lower() == "all":
+        fy_filter = None
+    elif args.fiscal_years:
         fy_filter = {y.strip() for y in args.fiscal_years.split(",") if y.strip()}
+    else:
+        fy_filter = _default_fiscal_years()
+    if fy_filter is not None:
+        print(f"limiting to fiscal years: {','.join(sorted(fy_filter))}")
 
     from huggingface_hub import HfApi
     api = HfApi(token=os.environ["HF_TOKEN"])

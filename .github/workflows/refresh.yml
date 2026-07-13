@@ -20,7 +20,7 @@ on:
         required: false
         default: ""
       fiscal_years:
-        description: "Limit to these FYs, e.g. '2025,2026' (blank = all changed years)"
+        description: "FYs to process (blank = current + prior FY; 'all' = full re-ingest)"
         required: false
         default: ""
   schedule:

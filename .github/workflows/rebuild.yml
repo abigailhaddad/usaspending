@@ -123,9 +123,23 @@ jobs:
           # R2 doesn't support the newer aws-cli default request checksums
           AWS_REQUEST_CHECKSUM_CALCULATION: when_required
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          # R2 intermittently 500s on CompleteMultipartUpload; the CLI's default
+          # ~2 retries aren't enough, so let it back off and retry 5xx harder.
+          AWS_MAX_ATTEMPTS: "10"
+          AWS_RETRY_MODE: adaptive
         run: |
-          aws s3 sync hf_serve/serve "s3://usaspending/bulk-awards/serve" \
-            --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" --no-progress
+          # Outer retry on top of the per-request retries above: s3 sync is
+          # incremental, so each pass only re-uploads what the last one failed to
+          # land. Without this, one stray InternalError sinks the whole rebuild.
+          for i in 1 2 3 4 5; do
+            if aws s3 sync hf_serve/serve "s3://usaspending/bulk-awards/serve" \
+                 --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" --no-progress; then
+              echo "R2 sync complete (pass $i)"; exit 0
+            fi
+            echo "R2 sync pass $i hit failures — retrying remaining objects"; sleep $((i * 10))
+          done
+          echo "::error::R2 sync still failing after 5 passes"
+          exit 1
 
   precompute:
     needs: sync_r2

@@ -102,28 +102,41 @@ def connect():
     return con
 
 
+_con = None   # shared across steps; replaced only after a failure (see with_retry)
+
+
 def with_retry(label, fn, attempts=3):
-    """Run one scan step on a fresh connection, retrying it whole on a transient R2/HF error.
+    """Run one scan step, retrying it whole on a transient R2/HF error.
 
     connect()'s http_retries do fire on a 502 — but with wait 500ms and backoff 2 all six
     tries land inside ~15 seconds, which isn't enough for the R2 blips we actually see (a
     502 mid-scan killed a rebuild that had already run 4 minutes). A half-finished scan
     can't be resumed, so back off in minutes and redo the step. Every step here is
     idempotent: same immutable serve files in, same output files overwritten.
+
+    Steps SHARE one connection on the happy path and only reconnect after a failure.
+    Reconnecting per step instead cost ~17 min of a ~31 min job — a fresh connection drops
+    DuckDB's cached parquet footers, so every step re-read 20 years of metadata cold.
     """
+    global _con
     for attempt in range(1, attempts + 1):
-        con = connect()
+        if _con is None:
+            _con = connect()
         try:
-            return fn(con)
+            return fn(_con)
         except duckdb.IOException as e:      # HTTPException subclasses this
+            # The connection may be wedged mid-request; drop it so the retry starts clean.
+            try:
+                _con.close()
+            except Exception:
+                pass
+            _con = None
             if attempt == attempts:
                 raise
             wait = 30 * 3 ** (attempt - 1)   # 30s, 90s
             print(f"  {label} failed ({str(e).splitlines()[0]}); "
                   f"retry {attempt}/{attempts - 1} in {wait}s", flush=True)
             time.sleep(wait)
-        finally:
-            con.close()
 
 
 def build_timeseries(dataset, con):

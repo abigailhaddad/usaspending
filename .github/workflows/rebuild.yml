@@ -143,8 +143,9 @@ jobs:
   precompute:
     needs: sync_r2
     runs-on: ubuntu-latest
-    # Historical baseline ~22 min; bound it for the same reason as sync_r2. Headroom on top
-    # of that covers precompute.py's with_retry backoff redoing a scan step after an R2 blip.
+    # Bound it for the same reason as sync_r2. The "~22 min" this used to cite is stale —
+    # observed 31 min on 2026-07-27 and growing with the archive. 60 leaves ~29 min of
+    # headroom for precompute.py's with_retry redoing a scan step after an R2 blip.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

@@ -20,11 +20,12 @@ on:
       years:
         description: "recent (newest 2 FYs) | all | comma-separated FYs"
         default: "recent"
-  # Chain automatically off the weekly ingestion — when new raw data lands, rebuild the
-  # serve layer without anyone kicking it by hand.
-  workflow_run:
-    workflows: ["Backfill / refresh HF dataset"]
-    types: [completed]
+  # NOT triggered by workflow_run on the ingestion. refresh.yml already dispatches this
+  # workflow itself when the drain completes, and it passes the year list it wants
+  # (current + prior FY + a rotating audit year). A workflow_run trigger fired a SECOND,
+  # input-less run seconds later that silently fell back to years=recent — two full
+  # rebuilds per drain, serialized by the concurrency group below, the redundant one
+  # taking ~90 min and emailing a failure whenever it hit an R2 blip.
 
 permissions:
   contents: write
@@ -35,8 +36,6 @@ concurrency:
 
 jobs:
   plan:
-    # On the chained trigger, only proceed if the ingestion actually succeeded.
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
@@ -49,7 +48,7 @@ jobs:
       - name: Plan compaction shards
         id: gen
         env:
-          # workflow_run/schedule carry no inputs → defaults (both / recent) apply.
+          # `gh workflow run` without -f applies the declared defaults; the || is a backstop.
           PRODUCT: ${{ github.event.inputs.product || 'both' }}
           YEARS: ${{ github.event.inputs.years || 'recent' }}
         run: python -m usaspending_archive.plan_compact
@@ -144,7 +143,9 @@ jobs:
   precompute:
     needs: sync_r2
     runs-on: ubuntu-latest
-    timeout-minutes: 45   # historical baseline ~22 min; bound it for the same reason as sync_r2
+    # Historical baseline ~22 min; bound it for the same reason as sync_r2. Headroom on top
+    # of that covers precompute.py's with_retry backoff redoing a scan step after an R2 blip.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

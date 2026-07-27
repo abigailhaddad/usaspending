@@ -16,6 +16,7 @@ Run from the repo root:  python usaspending_archive/precompute.py
 """
 import json
 import os
+import time
 from pathlib import Path
 
 import duckdb
@@ -99,6 +100,30 @@ def connect():
     elif os.environ.get("HF_TOKEN"):
         con.execute(f"CREATE SECRET hf (TYPE huggingface, TOKEN '{os.environ['HF_TOKEN']}')")
     return con
+
+
+def with_retry(label, fn, attempts=3):
+    """Run one scan step on a fresh connection, retrying it whole on a transient R2/HF error.
+
+    connect()'s http_retries do fire on a 502 — but with wait 500ms and backoff 2 all six
+    tries land inside ~15 seconds, which isn't enough for the R2 blips we actually see (a
+    502 mid-scan killed a rebuild that had already run 4 minutes). A half-finished scan
+    can't be resumed, so back off in minutes and redo the step. Every step here is
+    idempotent: same immutable serve files in, same output files overwritten.
+    """
+    for attempt in range(1, attempts + 1):
+        con = connect()
+        try:
+            return fn(con)
+        except duckdb.IOException as e:      # HTTPException subclasses this
+            if attempt == attempts:
+                raise
+            wait = 30 * 3 ** (attempt - 1)   # 30s, 90s
+            print(f"  {label} failed ({str(e).splitlines()[0]}); "
+                  f"retry {attempt}/{attempts - 1} in {wait}s", flush=True)
+            time.sleep(wait)
+        finally:
+            con.close()
 
 
 def build_timeseries(dataset, con):
@@ -318,14 +343,15 @@ def main():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site" / "api"))
     dest = Path("site/public/precomputed")
     dest.mkdir(parents=True, exist_ok=True)
-    con = connect()
     for dataset in ("contracts", "assistance"):
         print(f"precomputing {dataset} …", flush=True)
-        data = build(dataset, con)
-        data["agencies"] = build_agency_files(dataset, con, data["timeseries"], dest)
+        data = with_retry(f"{dataset} aggregates", lambda con: build(dataset, con))
+        data["agencies"] = with_retry(
+            f"{dataset} agency files",
+            lambda con: build_agency_files(dataset, con, data["timeseries"], dest))
         write_dataset(dataset, data, dest)
 
-        filters = build_filters(dataset, con)
+        filters = with_retry(f"{dataset} filters", lambda con: build_filters(dataset, con))
         fpath = dest / f"{dataset}.filters.json"
         fpath.write_text(json.dumps(filters, separators=(",", ":")))
         print(f"  wrote {fpath} ({fpath.stat().st_size/1e6:.2f} MB, {len(filters)} filterable fields)", flush=True)

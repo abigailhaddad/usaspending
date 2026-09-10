@@ -24,9 +24,14 @@ on:
         required: false
         default: ""
   schedule:
-    # Mondays — source re-publishes ~monthly. Deliberately an odd minute, not :00:
-    # GitHub drops/delays scheduled runs most at the top of the hour.
-    - cron: "23 9 * * 1"
+    # Daily. The source re-publishes ~monthly, but on no fixed weekday (the last
+    # three cycles all landed on the 6th: a Saturday, a Monday, a Thursday), so a
+    # weekly poll left a new cycle unused for up to six days. A no-op poll costs
+    # ~40s -- the whole cost of daily was the redundant serve rebuild it used to
+    # trigger, which the "Rebuild serve layer" step below now gates. Deliberately
+    # an odd minute, not :00: GitHub drops/delays scheduled runs most at the top
+    # of the hour.
+    - cron: "23 9 * * *"
 
 permissions:
   contents: write   # commit the updated manifest
@@ -59,6 +64,11 @@ jobs:
           [ -n "${{ github.event.inputs.fiscal_years }}" ] && ARG="$ARG --fiscal-years ${{ github.event.inputs.fiscal_years }}"
           python -m usaspending_archive.backfill $ARG | tee run.log
           grep -q CHAIN_NEEDED run.log && echo "chain=true" >> "$GITHUB_OUTPUT" || echo "chain=false" >> "$GITHUB_OUTPUT"
+          # How many files this hop actually ingested, for the rebuild gate below.
+          # backfill.py's last line is "processed N, M changed files remain"; a
+          # missing/garbled line falls back to 0, which the weekly slot covers.
+          PROCESSED=$(grep -oE '^processed [0-9]+' run.log | tail -1 | grep -oE '[0-9]+' || true)
+          echo "processed=${PROCESSED:-0}" >> "$GITHUB_OUTPUT"
 
       - name: Commit manifest
         if: always()
@@ -100,8 +110,17 @@ jobs:
 
       # When the backfill is fully drained (no more files to chain), recompact the
       # serve layer + publish. Without this the raw layer advances but the serve
-      # files everyone queries go stale. (May redundantly rebuild on a no-new-data
-      # run — that's idempotent and cheap insurance against a stale serve layer.)
+      # files everyone queries go stale.
+      #
+      # Gated on "this hop actually ingested something," OR Monday. Before the
+      # schedule went daily this step ran on every drain-complete run including
+      # no-op ones -- fine at one redundant ~30-90min rebuild per week ("idempotent
+      # and cheap insurance"), not fine at seven, especially since the rotating
+      # audit year below is keyed to the ISO WEEK and so would re-audit the same
+      # year seven days running for no added coverage. Keeping the Monday slot
+      # preserves that weekly no-op insurance exactly as it was; the processed>0
+      # arm is what's new, and it means a cycle that lands on a Tuesday gets its
+      # serve layer rebuilt that same day instead of six days later.
       - name: Rebuild serve layer when drain is complete
         if: always() && steps.run.outputs.chain == 'false'
         env:
@@ -120,7 +139,12 @@ jobs:
             ROT=$((FIRST + WEEK % SPAN))     # cycles 2008..PREV-1
             YEARS="$ROT,$YEARS"
           fi
-          echo "Backfill drained — rebuilding serve for years $YEARS (current+prior + rotating audit)."
+          PROCESSED="${{ steps.run.outputs.processed }}"
+          if [ "${PROCESSED:-0}" -eq 0 ] && [ "$(date -u +%u)" != "1" ]; then
+            echo "Nothing ingested this run and today is not the weekly insurance slot — skipping serve rebuild."
+            exit 0
+          fi
+          echo "Backfill drained (processed ${PROCESSED:-0} file(s)) — rebuilding serve for years $YEARS (current+prior + rotating audit)."
           gh workflow run rebuild.yml --ref "${{ github.ref_name }}" -f product=both -f years="$YEARS"
 
       - name: Summary

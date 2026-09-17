@@ -90,6 +90,32 @@ The data dictionary documents every column in both products.
 
 ## Quick start (DuckDB)
 
+### Querying without downloading (recommended)
+
+The `serve/{{product}}/{{fiscal_year}}.parquet` files are one compacted file per
+product per fiscal year (all agencies), sized for remote streaming — this is
+the fastest way to query without cloning the repo. Filter on
+`awarding_agency_code` / `funding_agency_code` for agency (the `agency` column
+in this layer is a leftover literal `"All"`, not a per-row value):
+
+```python
+import duckdb
+con = duckdb.connect()
+con.execute("INSTALL httpfs; LOAD httpfs;")
+con.sql('''
+  SELECT recipient_name, sum(federal_action_obligation) AS obligated
+  FROM read_parquet('hf://datasets/abigailhaddad/usaspending-bulk-awards/serve/contracts/2024.parquet')
+  WHERE awarding_agency_code = '097'
+  GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+''').show()
+```
+
+### After cloning / downloading the dataset locally
+
+The raw layer (one file per product × fiscal year × agency, Hive-partitioned)
+has full per-transaction detail. Once it's on disk, `hive_partitioning=true`
+gives partition pruning for free:
+
 ```python
 import duckdb
 con = duckdb.connect()
@@ -101,6 +127,11 @@ con.sql('''
   GROUP BY 1 ORDER BY 2 DESC LIMIT 10
 ''').show()
 ```
+
+Don't run that same `hive_partitioning=true` glob directly over `hf://` without
+downloading first — it makes DuckDB recursively list every partition directory
+over the network, which is slow and gets rate-limited by Hugging Face at this
+file count. Use the `serve/` layer above for remote queries instead.
 
 ## Provenance & updates
 

@@ -7,12 +7,14 @@ Parquet, and publishes it as a Hugging Face dataset:
 **[huggingface.co/datasets/abigailhaddad/usaspending-bulk-awards](https://huggingface.co/datasets/abigailhaddad/usaspending-bulk-awards)**
 
 The archive itself is ~4,600 per-agency ZIP/CSV files with no easy way to query
-across agencies or years. This turns it into a single Hive-partitioned Parquet
-tree (`fiscal_year=YYYY/agency=CODE/`), queryable directly over the network with
-DuckDB — no download required. The dataset card there (auto-generated from the
-current snapshot, see `usaspending_archive/dataset_card.py`) is the source of
-truth for row counts, sizes, and column layout; this README won't repeat numbers
-that go stale.
+across agencies or years. This turns it into typed, zstd-compressed Parquet,
+queryable directly over the network with DuckDB — no download required. The
+dataset card there (auto-generated from the current snapshot, see
+`usaspending_archive/dataset_card.py`) is the source of truth for row counts,
+sizes, and column layout; this README won't repeat numbers that go stale.
+
+Two layers ship in the dataset — use `serve/`, not the per-agency raw files, for
+remote queries (see below).
 
 ## Quick start
 
@@ -23,15 +25,25 @@ con.execute("INSTALL httpfs; LOAD httpfs;")
 con.sql('''
   SELECT recipient_name, sum(federal_action_obligation) AS obligated
   FROM read_parquet(
-    'hf://datasets/abigailhaddad/usaspending-bulk-awards/contracts/**/*.parquet',
-    hive_partitioning=true
+    'hf://datasets/abigailhaddad/usaspending-bulk-awards/serve/contracts/2024.parquet'
   )
-  WHERE fiscal_year = '2024' AND agency = '097'
+  WHERE awarding_agency_code = '097'
   GROUP BY 1 ORDER BY 2 DESC LIMIT 10
 ''').show()
 ```
 
 `demo.ipynb` is a runnable Colab notebook version of this.
+
+**Use `serve/{product}/{fiscal_year}.parquet`, not the raw
+`{product}/fiscal_year=YYYY/agency=CODE/` tree, for queries like this.** The raw
+tree is one file per (product, FY, agency) — thousands of files — and globbing
+it with `hive_partitioning=true` over `hf://` makes DuckDB recursively list every
+partition directory, which is slow and gets rate-limited by Hugging Face (verified:
+the raw-tree glob above didn't finish in 90s; the `serve/` query above takes ~10s).
+`serve/` has one compacted file per (product, fiscal year) with all agencies
+inside — filter on `awarding_agency_code` / `funding_agency_code` (the per-row
+values) rather than `agency` (a leftover literal column, always `"All"`, in that
+layer). See [`compact_serve.py`](usaspending_archive/compact_serve.py) for why.
 
 ## How it stays current
 

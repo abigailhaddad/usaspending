@@ -50,9 +50,9 @@ GitHub Actions — nothing needs to be run by hand:
 `backfill.py` is the one doing the actual HF writes on the daily schedule — it's
 the script to read first if you want to understand how data lands on Hugging Face.
 
-For a live inventory of the source archive (file counts, sizes, FY range),
-run `python3 -m usaspending_archive.archive_index` rather than trusting any
-number written down here.
+For current file counts, sizes, and FY range of the source archive, run
+`python3 -m usaspending_archive.archive_index` — those numbers change as the
+archive grows, so this README doesn't state them.
 
 ## Repo layout
 

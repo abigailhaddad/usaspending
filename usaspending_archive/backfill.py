@@ -7,7 +7,7 @@ so a chained run (fresh runner IP) resumes exactly where this one stopped.
 
 The CDN locks an IP out after ~15-20 files (validated 2026-05-31), so on the
 first IP_BLOCKED we stop and print CHAIN_NEEDED; the workflow then dispatches a
-fresh run. R2 mirroring is deferred (HF-only for now) — see docs/PLAN.md.
+fresh run. R2 mirroring is deferred (HF-only for now).
 
     python -m usaspending_archive.backfill                 # drain next slice
     python -m usaspending_archive.backfill --max-files 15  # cap per run

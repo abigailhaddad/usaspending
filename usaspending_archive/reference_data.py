@@ -1,4 +1,4 @@
-"""Snapshot USAspending reference/dimension tables to parquet (Tier 1 in FINDINGS).
+"""Snapshot USAspending reference/dimension tables to parquet.
 
 These are small JSON endpoints on api.usaspending.gov (a different host than the
 throttled archive bucket — no IP lockout here). They make the award/assistance

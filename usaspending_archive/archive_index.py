@@ -8,7 +8,7 @@ one file per agency:
     {Contracts,Assistance}_Delta  FY(All) x agency           (monthly changes)
 
 There are NO subaward or account (File A/B/C) files here. Those come only from
-the Custom Bulk Download API (see docs/FINDINGS.md).
+the Custom Bulk Download API.
 
 Ported from pull_usaspending/pull_usaspending/scan.py, generalized to all four
 products and to full pagination (the bucket lists 1000 keys/page).
@@ -110,7 +110,7 @@ def latest_datestamp(files: list[ArchiveFile]) -> str:
 
 
 def summarize(files: list[ArchiveFile]) -> None:
-    """Print the inventory table from docs/FINDINGS.md."""
+    """Print a product/kind inventory table (files, size) for the live archive."""
     by_prod: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
     fys: set[str] = set()
     for f in files:

@@ -2,6 +2,13 @@
 > Work in progress. Data and figures are not validated and may be wrong.
 > Not for analysis or decisions.
 
+> **Experimental / not the deliverable.** The dataset published to
+> [Hugging Face](https://huggingface.co/datasets/abigailhaddad/usaspending-bulk-awards)
+> (see the root [`README.md`](../README.md)) is what this repo actually ships and
+> maintains. This site is a BI viewer over that data (design in
+> [`../docs/BI_DESIGN.md`](../docs/BI_DESIGN.md)) that hasn't seen much use — treat
+> it as a secondary, less-maintained piece.
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

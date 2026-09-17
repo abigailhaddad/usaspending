@@ -2,7 +2,7 @@
 
 Built from the live snapshot so counts stay honest: reference-table row counts are
 read from data/reference/*.parquet. Product column counts + the archive inventory
-are documented constants (validated 2026-05-31; see docs/FINDINGS.md).
+are documented constants (validated 2026-05-31).
 
     python -m usaspending_archive.dataset_card   # writes data/reference/DATASET_CARD.md
 """
@@ -15,7 +15,7 @@ import pyarrow.parquet as pq
 ROOT = Path(__file__).resolve().parent.parent
 REF = ROOT / "data" / "reference"
 
-# Documented constants (docs/FINDINGS.md)
+# Documented constants (verified against the source archive's column headers)
 CONTRACTS_COLS = 297
 ASSISTANCE_COLS = 112
 FY_RANGE = "FY2007–present"

@@ -78,7 +78,24 @@ Two datasets (the schemas differ — contracts {CONTRACTS_COLS} columns, assista
 contracts/fiscal_year=YYYY/agency=CODE/part.parquet     # prime contracts ({CONTRACTS_COLS} cols)
 assistance/fiscal_year=YYYY/agency=CODE/part.parquet    # grants/loans/etc. ({ASSISTANCE_COLS} cols)
 reference/*.parquet                                     # joinable dimension tables (below)
+serve/{{contracts,assistance}}/YYYY.parquet               # one compacted file per product × year (no duplicates)
 ```
+
+> **Warning: `agency=All` is a duplicate — never combine it with the other agency partitions.**
+> Each `fiscal_year=YYYY/` directory holds the per-agency partitions (`agency=097`,
+> `agency=075`, …) **and** an `agency=All` partition, which is USAspending's own
+> complete per-year archive file: a full second copy of every transaction in that
+> year's per-agency partitions. A glob such as `contracts/**/*.parquet`, or any query
+> over a fiscal year without an agency filter, therefore counts every transaction
+> **twice** (row counts and dollar totals come out exactly 2×). In the raw tree,
+> always do one of:
+>
+> - filter `agency != 'All'` (per-agency detail), **or**
+> - use only `agency = 'All'` (one complete copy per year), **or**
+> - filter to specific agencies (`agency = '097'`).
+>
+> For remote queries, prefer the `serve/` layer below. It's built from the `All`
+> file alone, so each transaction appears once.
 
 ## Reference tables
 
@@ -125,6 +142,14 @@ con.sql('''
   FROM read_parquet('contracts/**/*.parquet', hive_partitioning=true)
   WHERE fiscal_year = '2024' AND agency = '097'
   GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+''').show()
+
+# Government-wide totals from the raw tree: EXCLUDE agency=All, or every row counts twice
+con.sql('''
+  SELECT fiscal_year, count(*) AS transactions, sum(federal_action_obligation) AS obligated
+  FROM read_parquet('contracts/**/*.parquet', hive_partitioning=true)
+  WHERE agency != 'All'
+  GROUP BY 1 ORDER BY 1
 ''').show()
 ```
 

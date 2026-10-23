@@ -9,6 +9,19 @@ The CDN locks an IP out after ~15-20 files (validated 2026-05-31), so on the
 first IP_BLOCKED we stop and print CHAIN_NEEDED; the workflow then dispatches a
 fresh run. R2 mirroring is deferred (HF-only for now).
 
+Exit status (2026-10-23): non-zero whenever this hop did not do its job cleanly --
+a file failed for any reason other than an IP block (NOT_FOUND / FAILED / a
+convert error), the publish or manifest save raised, or changed files remain but
+chaining was refused. Before this, every one of those printed a line and returned
+0, so the workflow went green while the mirror went stale; and a file that failed
+permanently stayed "remaining", so CHAIN_NEEDED fired forever and the serve
+rebuild (gated on the drain finishing) never ran.
+
+Chaining is capped: a hop that ingested nothing only chains if it was IP-blocked
+(a fresh runner IP is the fix for that), and only up to --max-stalled-hops
+consecutive zero-progress hops. A hop that made no progress and was NOT blocked
+never chains -- the next hop would just retry the same failing files.
+
     python -m usaspending_archive.backfill                 # drain next slice
     python -m usaspending_archive.backfill --max-files 15  # cap per run
     python -m usaspending_archive.backfill --agency 097    # one agency
@@ -42,7 +55,32 @@ def _default_fiscal_years() -> set[str]:
     return {str(fy), str(fy - 1)}
 
 
-def main() -> int:
+def chain_decision(*, blocked: bool, done: int, remaining: int,
+                   stalled_hops: int, max_stalled_hops: int) -> tuple[bool, str]:
+    """Should this hop dispatch another? Returns (chain, human-readable reason).
+
+    stalled_hops = consecutive zero-progress hops BEFORE this one (the workflow
+    carries it across the chain). The cap is on consecutive no-progress hops, not
+    total hops: a legitimate --fiscal-years all re-ingest is hundreds of hops at
+    ~15 files each, but every one of them makes progress.
+    """
+    if remaining <= 0 and not blocked:
+        return False, "drained"
+    if done > 0:
+        return True, f"{remaining} changed files remain"
+    if not blocked:
+        return False, (f"no progress and not IP-blocked -- the {remaining} remaining "
+                       f"file(s) failed on their own; another hop would retry the same "
+                       f"failures forever, so not chaining")
+    stalled = stalled_hops + 1
+    if stalled > max_stalled_hops:
+        return False, (f"IP-blocked with no progress for {stalled} consecutive hops "
+                       f"(cap --max-stalled-hops {max_stalled_hops}); not chaining")
+    return True, (f"IP-blocked before any file landed (zero-progress hop "
+                  f"{stalled}/{max_stalled_hops}); chaining for a fresh runner IP")
+
+
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-files", type=int, default=200)
     ap.add_argument("--agency", default=None)
@@ -52,7 +90,13 @@ def main() -> int:
                          "Blank = current + prior fiscal year (the normal refresh "
                          "window). Pass 'all' for a full-catalog re-ingest, e.g. when "
                          "the source restates ETags across every year.")
-    args = ap.parse_args()
+    ap.add_argument("--stalled-hops", type=int, default=0,
+                    help="Consecutive zero-progress hops before this one (set by "
+                         "refresh.yml when it self-chains; 0 for a fresh run).")
+    ap.add_argument("--max-stalled-hops", type=int, default=3,
+                    help="Refuse to chain after this many consecutive hops that "
+                         "ingested nothing.")
+    args = ap.parse_args(argv)
 
     # Blank -> current + prior FY (what a monthly source refresh actually restates);
     # 'all' -> no filter. Bounding here stops a source-wide ETag shuffle from
@@ -88,10 +132,12 @@ def main() -> int:
     con = duckdb.connect()
     done = 0
     blocked = False
+    errors: list[str] = []  # every non-IP-block failure; any entry -> non-zero exit
     # Download + convert a batch locally, then push it as ONE HF commit. HF rate-limits
     # commits (429), so one-commit-per-file does NOT scale — one commit per run does.
-    # Everything is wrapped so an unexpected error still exits cleanly and signals the
-    # chain (work remains) rather than crashing before CHAIN_NEEDED is printed.
+    # A per-file failure (NOT_FOUND / FAILED / bad zip / convert error) skips that file
+    # and keeps going so the rest of the batch still lands; it is recorded in `errors`
+    # and fails the job at the end. The outer except catches publish/manifest errors.
     try:
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
@@ -103,10 +149,17 @@ def main() -> int:
                     if zp == IP_BLOCKED:
                         blocked = True
                         break
+                    errors.append(f"{f.key}: download {zp}")
                     continue
-                csvs = extract_csvs(zp, tmp / manifest.logical_id(f).replace("/", "_"))
-                parquet = tmp / (manifest.logical_id(f).replace("/", "_") + ".parquet")
-                info = csv_to_parquet(csvs, parquet, con)
+                try:
+                    csvs = extract_csvs(zp, tmp / manifest.logical_id(f).replace("/", "_"))
+                    parquet = tmp / (manifest.logical_id(f).replace("/", "_") + ".parquet")
+                    info = csv_to_parquet(csvs, parquet, con)
+                except Exception as exc:
+                    print(f"{f.key}  -> convert error: {exc}")
+                    errors.append(f"{f.key}: convert error: {exc}")
+                    zp.unlink(missing_ok=True)
+                    continue
                 staged.append((parquet, manifest.parquet_key(f), f, info))
                 print(f"{manifest.parquet_key(f):55s} {info['rows']:>9,} rows  {info['bytes']/1e6:6.1f}MB")
                 zp.unlink(missing_ok=True)
@@ -124,11 +177,23 @@ def main() -> int:
                 done = len(staged)
     except Exception as exc:
         print(f"ERROR (progress through last commit is saved): {exc}")
+        errors.append(f"unexpected error: {exc}")
 
     remaining = total_todo - done
+    # This line's format is parsed by refresh.yml ("^processed N") -- keep it.
     print(f"\nprocessed {done}, {remaining} changed files remain")
-    if blocked or remaining > 0:
+    chain, reason = chain_decision(blocked=blocked, done=done, remaining=remaining,
+                                   stalled_hops=args.stalled_hops,
+                                   max_stalled_hops=args.max_stalled_hops)
+    print(f"chain: {reason}")
+    if chain:
         print("CHAIN_NEEDED")
+    stranded = remaining > 0 and not chain
+    if errors or stranded:
+        print(f"\nFAILED: {len(errors)} error(s)" + (", drain stranded" if stranded else ""))
+        for e in errors:
+            print(f"  - {e}")
+        return 1
     return 0
 
 

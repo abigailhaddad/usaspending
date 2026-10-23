@@ -1,0 +1,58 @@
+name: Mirror staleness check
+
+# Weekly backstop for failures that keep refresh.yml green while the mirror falls
+# behind. Compares the archive's newest Full datestamp with metadata/manifest.json
+# and with max(action_date) in the serve layer on HF; if either trails by more than
+# 40 days, opens an issue (or comments on the open one) and fails the run.
+# Read-only against the archive and HF: no secrets beyond the default GITHUB_TOKEN.
+# See usaspending_archive/staleness.py for what it can and can't detect.
+
+on:
+  schedule:
+    # Mondays, well after the 09:23 daily refresh. Odd minute: GitHub drops/delays
+    # scheduled runs most at the top of the hour.
+    - cron: "47 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: Compare archive, manifest, serve
+        id: check
+        run: python -m usaspending_archive.staleness --report staleness.md
+
+      - name: Open or update the staleness issue
+        if: steps.check.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TITLE="Mirror is stale: HF dataset is behind the USAspending archive"
+          { cat staleness.md; echo; echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"; } > body.md
+          # One open issue at a time: comment on it each week until someone closes it.
+          N=$(gh issue list --state open --search "in:title \"$TITLE\"" --json number,title \
+                --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)
+          if [ -n "$N" ]; then
+            gh issue comment "$N" --body-file body.md
+          else
+            gh issue create --title "$TITLE" --body-file body.md
+          fi
+          echo "::error::mirror is stale -- see the '$TITLE' issue"
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## Mirror staleness'; cat staleness.md 2>/dev/null || echo 'check did not produce a report'; } >> "$GITHUB_STEP_SUMMARY"

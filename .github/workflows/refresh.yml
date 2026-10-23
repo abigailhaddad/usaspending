@@ -23,6 +23,16 @@ on:
         description: "FYs to process (blank = current + prior FY; 'all' = full re-ingest)"
         required: false
         default: ""
+      # The two below are bookkeeping the chain carries from hop to hop; leave them
+      # at 0 when dispatching by hand.
+      stalled_hops:
+        description: "(chain bookkeeping) consecutive prior hops that ingested nothing"
+        required: false
+        default: "0"
+      chain_processed:
+        description: "(chain bookkeeping) files ingested by earlier hops of this chain"
+        required: false
+        default: "0"
   schedule:
     # Daily. The source re-publishes ~monthly, but on no fixed weekday (the last
     # three cycles all landed on the 6th: a Saturday, a Monday, a Thursday), so a
@@ -62,13 +72,34 @@ jobs:
           [ -n "${{ github.event.inputs.agency }}" ] && ARG="$ARG --agency ${{ github.event.inputs.agency }}"
           [ -n "${{ github.event.inputs.product }}" ] && ARG="$ARG --product ${{ github.event.inputs.product }}"
           [ -n "${{ github.event.inputs.fiscal_years }}" ] && ARG="$ARG --fiscal-years ${{ github.event.inputs.fiscal_years }}"
-          python -m usaspending_archive.backfill $ARG | tee run.log
+          STALLED_IN="${{ github.event.inputs.stalled_hops }}"; STALLED_IN="${STALLED_IN:-0}"
+          PRIOR="${{ github.event.inputs.chain_processed }}"; PRIOR="${PRIOR:-0}"
+          # backfill.py exits non-zero when a file fails for a non-IP-block reason, the
+          # publish raises, or the drain is stranded. A bare `python ... | tee` returns
+          # tee's status (the default shell has no pipefail), which is how those failures
+          # used to finish green -- so capture python's own status and re-raise it at the
+          # end, AFTER writing the outputs the later steps need.
+          set +e
+          python -m usaspending_archive.backfill $ARG --stalled-hops "$STALLED_IN" 2>&1 | tee run.log
+          RC=${PIPESTATUS[0]}
+          set -e
           grep -q CHAIN_NEEDED run.log && echo "chain=true" >> "$GITHUB_OUTPUT" || echo "chain=false" >> "$GITHUB_OUTPUT"
           # How many files this hop actually ingested, for the rebuild gate below.
-          # backfill.py's last line is "processed N, M changed files remain"; a
+          # backfill.py prints "processed N, M changed files remain"; a
           # missing/garbled line falls back to 0, which the weekly slot covers.
           PROCESSED=$(grep -oE '^processed [0-9]+' run.log | tail -1 | grep -oE '[0-9]+' || true)
-          echo "processed=${PROCESSED:-0}" >> "$GITHUB_OUTPUT"
+          PROCESSED="${PROCESSED:-0}"
+          echo "processed=$PROCESSED" >> "$GITHUB_OUTPUT"
+          # Carried to the next hop: consecutive zero-progress hops (backfill.py refuses
+          # to chain past --max-stalled-hops) and the chain's running ingest total (so
+          # the rebuild gate sees work done by EARLIER hops, not just this one).
+          if [ "$PROCESSED" -eq 0 ]; then echo "next_stalled=$((STALLED_IN + 1))" >> "$GITHUB_OUTPUT"
+          else echo "next_stalled=0" >> "$GITHUB_OUTPUT"; fi
+          echo "chain_processed=$((PRIOR + PROCESSED))" >> "$GITHUB_OUTPUT"
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::backfill exited $RC -- see the FAILED block at the end of the log"
+            exit "$RC"
+          fi
 
       - name: Commit manifest
         if: always()
@@ -100,7 +131,9 @@ jobs:
                  -f max_files="${{ github.event.inputs.max_files }}" \
                  -f agency="${{ github.event.inputs.agency }}" \
                  -f product="${{ github.event.inputs.product }}" \
-                 -f fiscal_years="${{ github.event.inputs.fiscal_years }}"; then
+                 -f fiscal_years="${{ github.event.inputs.fiscal_years }}" \
+                 -f stalled_hops="${{ steps.run.outputs.next_stalled }}" \
+                 -f chain_processed="${{ steps.run.outputs.chain_processed }}"; then
               echo "chained next run (attempt $i)"; exit 0
             fi
             echo "dispatch failed, retry $i"; sleep $((RANDOM % 8 + 7))
@@ -128,8 +161,13 @@ jobs:
         run: |
           # Recompact current + prior FY (what a monthly update normally touches),
           # NOT all ~20 — recompacting everything wastes time and risks HF throttling.
-          # PLUS one rotating older year per ISO week, so historical restatements get
-          # caught too — the whole back-catalog gets re-audited over ~a quarter.
+          # PLUS one rotating older year per ISO week (2008..PREV-1, so each older year
+          # comes round every ~18 weeks). What that does NOT do: catch source-side
+          # restatements of old years. Backfill above only re-downloads current + prior
+          # FY (unless dispatched with fiscal_years=all), so an older year's raw files on
+          # HF never change on a routine run; recompacting them just re-derives
+          # serve/{product}/{year}.parquet from the same raw input. It repairs a serve
+          # file that drifted from its raw (a bad or partial compaction), nothing more.
           Y=$(date -u +%Y); M=$(date -u +%m); FY=$Y; [ "$M" -ge 10 ] && FY=$((Y + 1))
           PREV=$((FY - 1)); FIRST=2008
           YEARS="$PREV,$FY"
@@ -139,12 +177,14 @@ jobs:
             ROT=$((FIRST + WEEK % SPAN))     # cycles 2008..PREV-1
             YEARS="$ROT,$YEARS"
           fi
-          PROCESSED="${{ steps.run.outputs.processed }}"
+          # Whole-chain total, not just this hop: the last hop of a drain can ingest 0
+          # (e.g. only permanently failing files were left) after earlier hops landed data.
+          PROCESSED="${{ steps.run.outputs.chain_processed }}"
           if [ "${PROCESSED:-0}" -eq 0 ] && [ "$(date -u +%u)" != "1" ]; then
-            echo "Nothing ingested this run and today is not the weekly insurance slot — skipping serve rebuild."
+            echo "Nothing ingested this chain and today is not the weekly insurance slot — skipping serve rebuild."
             exit 0
           fi
-          echo "Backfill drained (processed ${PROCESSED:-0} file(s)) — rebuilding serve for years $YEARS (current+prior + rotating audit)."
+          echo "Backfill chain finished (processed ${PROCESSED:-0} file(s) across hops) — rebuilding serve for years $YEARS (current+prior + rotating audit)."
           gh workflow run rebuild.yml --ref "${{ github.ref_name }}" -f product=both -f years="$YEARS"
 
       - name: Summary

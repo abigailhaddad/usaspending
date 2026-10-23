@@ -49,8 +49,15 @@ def save(path: Path, manifest: dict) -> None:
 
 
 def changed(files: list[ArchiveFile], manifest: dict, kind: str = "Full") -> list[ArchiveFile]:
-    """Files that are new or whose ETag differs from the manifest (newest datestamp only)."""
-    latest = max((f.datestamp for f in files), default="")
+    """Files that are new or whose ETag differs from the manifest (newest datestamp only).
+
+    "Newest" is computed over files of `kind` only. It used to be the max across
+    every kind, so a Delta published on a later date than the current Full cycle
+    made `latest` a date no Full file carries -- every Full file then failed the
+    datestamp test, this returned [], and the daily refresh reported "0 changed
+    files" (green) while the mirror sat a whole cycle behind.
+    """
+    latest = max((f.datestamp for f in files if f.kind == kind), default="")
     todo: list[ArchiveFile] = []
     for f in files:
         if f.kind != kind or f.datestamp != latest:

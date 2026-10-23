@@ -32,7 +32,7 @@ def main() -> None:
 
     print("listing archive...")
     files = list_archive()
-    ds = latest_datestamp(files)
+    ds = latest_datestamp(files, kind="Full")  # Delta dates can run ahead of Full
     products = [args.product] if args.product else ["Contracts", "Assistance"]
     todo = [f for f in files
             if f.agency_code == args.agency and f.kind == "Full"

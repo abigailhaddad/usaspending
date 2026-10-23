@@ -55,6 +55,7 @@ GitHub Actions — nothing needs to be run by hand:
 |---|---|---|---|
 | [`refresh.yml`](.github/workflows/refresh.yml) | daily | Diffs the archive against the manifest, converts + uploads changed files to HF, self-chains until drained (the source CDN throttles a runner IP after ~15–20 files) | [`backfill.py`](usaspending_archive/backfill.py) (publishes via [`publish.py`](usaspending_archive/publish.py)) |
 | [`rebuild.yml`](.github/workflows/rebuild.yml) | after a drain with changes | Compacts per-agency raw files into a per-year "serve" layer on HF, mirrors it to R2, regenerates precomputed dashboard aggregates | [`compact_serve.py`](usaspending_archive/compact_serve.py) → [`precompute.py`](usaspending_archive/precompute.py) |
+| [`staleness.yml`](.github/workflows/staleness.yml) | weekly | Compares the archive's newest Full cycle with the manifest and the serve layer's max `action_date`; opens/comments on a GitHub issue and fails if either is >40 days behind | [`staleness.py`](usaspending_archive/staleness.py) |
 | [`refresh_reference.yml`](.github/workflows/refresh_reference.yml) | manual | Re-snapshots the small reference/dimension tables (data dictionary, agency crosswalk, etc.) and publishes them to HF | [`reference_data.py`](usaspending_archive/reference_data.py) |
 | [`test.yml`](.github/workflows/test.yml) | every push/PR | Offline pytest suite, no network or credentials | — |
 | [`validate.yml`](.github/workflows/validate.yml) | manual | Runs the fetch→convert pipeline for one agency to sanity-check timing/size | [`run_one_agency.py`](usaspending_archive/run_one_agency.py) |
@@ -79,6 +80,7 @@ usaspending_archive/   # the pipeline: fetch archive zips → typed Parquet → 
   publish.py               HF (+ R2) upload helpers, used by backfill.py
   compact_serve.py         per-agency raw → per-year "serve" layer (query-optimized),
                             uploaded to HF directly
+  staleness.py             weekly check: is the mirror behind the archive? (staleness.yml)
   plan_compact.py          decides which (product, year) shards rebuild.yml compacts
   precompute.py            builds the dashboard JSON in site/public/precomputed
   reference_data.py        snapshots small dimension tables (agency codes, CFDA, etc.)

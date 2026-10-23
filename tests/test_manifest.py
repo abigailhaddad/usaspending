@@ -82,3 +82,11 @@ def test_iter_tree_keys(tmp_path):
     p.write_bytes(b"x")
     files = publish.iter_tree(tmp_path)
     assert files == [(p, "contracts/fiscal_year=2024/agency=097/part.parquet")]
+
+
+def test_archive_latest_datestamp_by_kind():
+    from usaspending_archive.archive_index import latest_datestamp
+    files = [_f("Contracts", "2026", "097", "f", datestamp="20261006"),
+             _f("Contracts", "All", "097", "d", datestamp="20261015", kind="Delta")]
+    assert latest_datestamp(files) == "20261015"
+    assert latest_datestamp(files, kind="Full") == "20261006"

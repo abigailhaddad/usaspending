@@ -87,6 +87,7 @@ def main() -> int:
 
     con = duckdb.connect()
     done = 0
+    skipped = 0   # not fetchable / not convertible this run; retried by the next scheduled run
     blocked = False
     # Download + convert a batch locally, then push it as ONE HF commit. HF rate-limits
     # commits (429), so one-commit-per-file does NOT scale — one commit per run does.
@@ -103,15 +104,26 @@ def main() -> int:
                     if zp == IP_BLOCKED:
                         blocked = True
                         break
+                    skipped += 1
                     continue
-                csvs = extract_csvs(zp, tmp / manifest.logical_id(f).replace("/", "_"))
-                parquet = tmp / (manifest.logical_id(f).replace("/", "_") + ".parquet")
-                info = csv_to_parquet(csvs, parquet, con)
+                csvs = []
+                try:
+                    csvs = extract_csvs(zp, tmp / manifest.logical_id(f).replace("/", "_"))
+                    parquet = tmp / (manifest.logical_id(f).replace("/", "_") + ".parquet")
+                    info = csv_to_parquet(csvs, parquet, con)
+                except Exception as exc:
+                    # One bad zip (e.g. a truncated download) must not discard the files
+                    # already staged this run, nor fail the same way at the head of every
+                    # later run.
+                    print(f"{manifest.parquet_key(f)}  -> convert failed, skipping: {exc}")
+                    skipped += 1
+                    continue
+                finally:
+                    zp.unlink(missing_ok=True)
+                    for c in csvs:
+                        c.unlink(missing_ok=True)
                 staged.append((parquet, manifest.parquet_key(f), f, info))
                 print(f"{manifest.parquet_key(f):55s} {info['rows']:>9,} rows  {info['bytes']/1e6:6.1f}MB")
-                zp.unlink(missing_ok=True)
-                for c in csvs:
-                    c.unlink(missing_ok=True)
 
             if staged:
                 publish_to_hf([(p, k) for p, k, _, _ in staged], HF_REPO,
@@ -125,8 +137,12 @@ def main() -> int:
     except Exception as exc:
         print(f"ERROR (progress through last commit is saved): {exc}")
 
-    remaining = total_todo - done
-    print(f"\nprocessed {done}, {remaining} changed files remain")
+    # Files skipped above stay out of the manifest, so the next scheduled run tries them
+    # again; counting them as "remaining" made every run print CHAIN_NEEDED forever and
+    # kept the serve rebuild (which only runs when the chain ends) from ever firing.
+    remaining = total_todo - done - skipped
+    print(f"\nprocessed {done}, {remaining} changed files remain"
+          + (f" ({skipped} skipped; retried next scheduled run)" if skipped else ""))
     if blocked or remaining > 0:
         print("CHAIN_NEEDED")
     return 0

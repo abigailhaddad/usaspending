@@ -26,7 +26,7 @@ import duckdb
 from . import manifest
 from .archive_index import list_archive
 from .convert import csv_to_parquet
-from .fetch import IP_BLOCKED, download_zip, extract_csvs
+from .fetch import IP_BLOCKED, NOT_FOUND, download_zip, extract_csvs
 from .publish import publish_to_hf
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -82,12 +82,15 @@ def main() -> int:
     # newest fiscal years first — recent spending is what most analyses want
     todo.sort(key=lambda f: f.fiscal_year, reverse=True)
     total_todo = len(todo)
-    todo = todo[:args.max_files]
-    print(f"{total_todo} changed files; processing up to {len(todo)} this run; HF repo {HF_REPO}")
+    # NOT_FOUND files never get staged, so they must not eat the --max-files slice
+    # (else the same dead files fill every run's slice and nothing progresses); the
+    # loop below stops once max_files files are staged instead.
+    print(f"{total_todo} changed files; processing up to {min(total_todo, args.max_files)} this run; HF repo {HF_REPO}")
 
     con = duckdb.connect()
     done = 0
     blocked = False
+    not_found = 0
     # Download + convert a batch locally, then push it as ONE HF commit. HF rate-limits
     # commits (429), so one-commit-per-file does NOT scale — one commit per run does.
     # Everything is wrapped so an unexpected error still exits cleanly and signals the
@@ -97,12 +100,16 @@ def main() -> int:
             tmp = Path(td)
             staged: list[tuple[Path, str, object, dict]] = []  # (parquet, key, file, info)
             for f in todo:
+                if len(staged) >= args.max_files:
+                    break
                 zp = download_zip(f.url)
                 if isinstance(zp, str):
                     print(f"{f.key}  -> {zp}")
                     if zp == IP_BLOCKED:
                         blocked = True
                         break
+                    if zp == NOT_FOUND:
+                        not_found += 1
                     continue
                 csvs = extract_csvs(zp, tmp / manifest.logical_id(f).replace("/", "_"))
                 parquet = tmp / (manifest.logical_id(f).replace("/", "_") + ".parquet")
@@ -125,8 +132,12 @@ def main() -> int:
     except Exception as exc:
         print(f"ERROR (progress through last commit is saved): {exc}")
 
-    remaining = total_todo - done
+    # NOT_FOUND files (listed but 404) stay in `changed` forever; counting them as
+    # remaining made every run print CHAIN_NEEDED and re-dispatch endlessly.
+    remaining = total_todo - done - not_found
     print(f"\nprocessed {done}, {remaining} changed files remain")
+    if not_found:
+        print(f"{not_found} listed files returned NOT_FOUND (not counted as remaining)")
     if blocked or remaining > 0:
         print("CHAIN_NEEDED")
     return 0

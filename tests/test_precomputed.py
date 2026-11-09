@@ -123,3 +123,35 @@ def test_each_agency_file_parses_and_has_shape(ds):
         assert set(af) >= {"years", "kpis", "dims", "timeseries", "agency"}
         for y, k in af["kpis"].items():
             assert _finite_number(k["obl"]) and _is_count(k["txn"])
+
+
+def test_build_filters_does_not_swallow_a_transient_io_error(monkeypatch):
+    """An R2/HF blip during a filter scan must propagate so with_retry can redo the step,
+    not silently drop the field from the committed filters.json."""
+    import sys
+    import duckdb
+    root = os.path.join(os.path.dirname(__file__), "..")
+    monkeypatch.syspath_prepend(os.path.join(root, "site", "api"))
+    monkeypatch.syspath_prepend(root)
+    from usaspending_archive import precompute
+
+    class FlakyCon:
+        def execute(self, sql):
+            raise duckdb.IOException("HTTP 502")
+
+    with pytest.raises(duckdb.IOException):
+        precompute.build_filters("contracts", FlakyCon())
+
+
+def test_build_filters_still_skips_a_field_with_a_sql_error(monkeypatch):
+    import duckdb
+    root = os.path.join(os.path.dirname(__file__), "..")
+    monkeypatch.syspath_prepend(os.path.join(root, "site", "api"))
+    monkeypatch.syspath_prepend(root)
+    from usaspending_archive import precompute
+
+    class BadCol:
+        def execute(self, sql):
+            raise duckdb.BinderException("no such column")
+
+    assert precompute.build_filters("contracts", BadCol()) == {}

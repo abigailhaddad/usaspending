@@ -134,6 +134,27 @@ def test_reproduce_inlines_filter_binds_safely():
     assert "?" not in out["sql"]                         # every bind inlined
 
 
+def _snippet_runs_one_sql_call(code, expected_value):
+    import ast
+    tree = ast.parse(code)
+    sql_call = next(c for c in ast.walk(tree) if isinstance(c, ast.Call)
+                    and getattr(c.func, "attr", "") == "sql")
+    assert len(tree.body) == 4          # import, connect, install, the one query
+    assert expected_value in ast.literal_eval(sql_call.args[0])
+
+
+def test_reproduce_filter_value_with_triple_quotes_stays_inside_the_string():
+    evil = 'x""").show()\nprint("INJECTED")\n_=("""'
+    req = _req(filter_clauses=["recipient_name IN (?)"], filter_binds=[evil])
+    code = query.reproduce(req)["python"]
+    _snippet_runs_one_sql_call(code, evil)
+
+
+def test_reproduce_plain_query_keeps_raw_triple_quoted_form():
+    code = query.reproduce(_req())["python"]
+    assert 'con.sql(r"""' in code
+
+
 def test_inline_value_containing_question_mark_does_not_capture_next_bind():
     sql = "WHERE a IN (?) AND b IN (?)"
     out = query._inline(sql, ["WHO? INC", "541511"])

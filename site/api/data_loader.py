@@ -13,6 +13,7 @@ import os
 import duckdb
 
 import query  # for hf_source
+from dims import DATASETS
 
 # The data is static between monthly refreshes, so identical query responses are safe to
 # cache hard. Browser 1h, CDN (Vercel edge) 1 day, serve-stale-while-revalidating a week.
@@ -23,6 +24,12 @@ CACHE_CONTROL = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=60
 
 
 def source_expr(dataset):
+    # `dataset` is a raw query-string value and lands inside a quoted path below, then in
+    # SQL. /api/fields, /api/detail and /api/filter_options reach here before anything else
+    # checks it, so a value with a quote could add its own FROM sources (e.g. read_csv of a
+    # local file). Allowlist it here, where every caller passes through.
+    if dataset not in DATASETS:
+        raise ValueError("bad dataset")
     tmpl = os.environ.get("USP_SOURCE_TMPL")
     if tmpl:
         return tmpl.format(dataset=dataset)

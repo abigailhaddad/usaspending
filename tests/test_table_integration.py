@@ -139,3 +139,25 @@ def test_assistance_detail_uses_fain_columns():
     assert "award_id_fain" in res["columns"]
     assert "cfda_number" in res["columns"]
     assert res["count"] == 3
+
+
+# ---- dataset is allowlisted before it reaches SQL ------------------------
+
+EVIL = ("contracts/part.csv', all_varchar=true) t1, "
+        "read_csv('{secret}', all_varchar=false) t2, read_csv('{fixtures}/contracts")
+
+
+def test_fields_rejects_dataset_that_would_add_a_file_source(tmp_path):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOPSECRET_TOKEN_VALUE,b\n1,2\n")
+    evil = EVIL.format(secret=secret, fixtures=FIXTURES)
+    with pytest.raises(ValueError):
+        table.fields_response(_params(dataset=evil))
+
+
+def test_detail_and_filter_options_reject_unknown_dataset():
+    with pytest.raises(ValueError):
+        table.detail_response(_params(dataset="contracts/x', y) --"))
+    import filter_options
+    with pytest.raises(ValueError):
+        filter_options.build_options("state", "nope")

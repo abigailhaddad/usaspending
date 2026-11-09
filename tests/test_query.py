@@ -153,3 +153,9 @@ def test_reproduce_filter_value_with_triple_quotes_stays_inside_the_string():
 def test_reproduce_plain_query_keeps_raw_triple_quoted_form():
     code = query.reproduce(_req())["python"]
     assert 'con.sql(r"""' in code
+
+
+def test_inline_value_containing_question_mark_does_not_capture_next_bind():
+    sql = "WHERE a IN (?) AND b IN (?)"
+    out = query._inline(sql, ["WHO? INC", "541511"])
+    assert out == "WHERE a IN ('WHO? INC') AND b IN ('541511')"

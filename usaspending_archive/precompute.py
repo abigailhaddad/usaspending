@@ -265,6 +265,10 @@ def build_filters(dataset, con):
                 opts = [{"value": v, "label": v} for v, _ in rows]
             out[f] = {"options": opts}
             print(f"  filter {f}: {len(opts)} options", flush=True)
+        except duckdb.IOException:
+            # A transient R2/HF error is not "this field has no options". Let with_retry
+            # redo the step; swallowing it here wrote a filters.json missing the field.
+            raise
         except Exception as e:
             print(f"  filter {f}: skip ({str(e)[:60]})", flush=True)
     return out

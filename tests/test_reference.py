@@ -28,3 +28,26 @@ def test_parse_keeps_both_sections_and_drops_trailing():
     assert row["Award File"] == "Contracts.csv"
     assert row["Award File (O)"] == "Contracts"
     assert "None" not in row and len(row) == 5  # trailing null column dropped
+
+
+def test_empty_table_is_a_failure_and_is_not_uploaded(monkeypatch, tmp_path):
+    import sys
+    import types
+    from usaspending_archive import reference_data as rd
+
+    uploaded = []
+
+    class FakeApi:
+        def __init__(self, **kw): pass
+        def upload_file(self, path_or_fileobj, path_in_repo, **kw):
+            uploaded.append(path_in_repo)
+
+    monkeypatch.setenv("HF_TOKEN", "x")
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(HfApi=FakeApi))
+    monkeypatch.setattr(rd, "OUT", tmp_path)
+    monkeypatch.setattr(rd, "ROOT", tmp_path)
+    monkeypatch.setattr(rd, "SPECS", {"good": lambda: [{"a": 1}], "empty": lambda: []})
+    (tmp_path / "stale.parquet").write_bytes(b"leftover")   # not from this run
+
+    assert rd.snapshot_all() == ["empty"]
+    assert uploaded == ["reference/good.parquet"]

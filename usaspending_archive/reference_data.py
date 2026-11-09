@@ -124,25 +124,38 @@ def write_table(name: str, rows: list[dict]) -> Path:
     return out
 
 
-def snapshot_all() -> None:
+def snapshot_all() -> list[str]:
+    """Write and publish every table that fetched. Returns the names that failed.
+
+    A table that comes back empty counts as a failure: pyarrow writes a zero-column parquet
+    for [], and uploading it would overwrite the published reference table with nothing
+    (e.g. agency_codes.csv with a renamed header yields no rows). Only tables written in
+    this run are uploaded, never leftovers in OUT.
+    """
     import os
+    written, failed = [], []
     for name, fn in SPECS.items():
         try:
             rows = fn()
+            if not rows:
+                raise ValueError("returned no rows")
             out = write_table(name, rows)
+            written.append(out)
             print(f"{name:20s} {len(rows):>6} rows -> {out.relative_to(ROOT)} ({out.stat().st_size/1e3:.0f} KB)")
         except Exception as exc:
+            failed.append(name)
             print(f"{name:20s} FAILED: {exc}")
     if os.environ.get("HF_TOKEN"):  # publish to the HF dataset's reference/ folder
         from huggingface_hub import HfApi
         api = HfApi(token=os.environ["HF_TOKEN"])
-        for p in sorted(OUT.glob("*.parquet")):
+        for p in sorted(written):
             api.upload_file(path_or_fileobj=str(p), path_in_repo=f"reference/{p.name}",
                             repo_id="abigailhaddad/usaspending-bulk-awards", repo_type="dataset")
             print(f"uploaded reference/{p.name}")
+    return failed
 
 
 if __name__ == "__main__":
-    snapshot_all()
+    raise SystemExit(1 if snapshot_all() else 0)
 
 # TODO: NAICS + PSC full code->description trees (recursive references/filter_tree/...).

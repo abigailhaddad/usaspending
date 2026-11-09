@@ -28,6 +28,11 @@ import duckdb
 
 from .manifest import load
 
+HF_REPO = "abigailhaddad/usaspending-bulk-awards"
+ROOT = Path(__file__).resolve().parent.parent
+MANIFEST = ROOT / "metadata" / "manifest.json"
+RESOLVE = f"https://huggingface.co/datasets/{HF_REPO}/resolve/main/"
+
 # 2026-11-09: count a transaction USASpending re-published only once (contracts).
 # USASpending's 20261106 archive has a second row for 15,567 FY2026 DoD transactions
 # that FPDS records once: same award, modification number, action date and amount, a

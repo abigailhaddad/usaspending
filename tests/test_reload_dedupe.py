@@ -77,3 +77,12 @@ def test_lockheed_w31p4q25c0007_totals_to_fpds():
         rows.append((k, m, d, a, f"{i}a", "2026-07-20"))
         rows.append((k, m, d, a, f"{i}b", "2026-11-04"))
     assert round(sum(a for _, a in _run(rows)), 2) == 446675758.01
+
+
+def test_module_constants_main_needs_are_defined():
+    # 2026-11-09: the reload-window rewrite (#11) deleted these, and the first
+    # rebuild died at startup with NameError: MANIFEST. main() reads all four.
+    from usaspending_archive import compact_serve as cs
+    assert cs.HF_REPO == "abigailhaddad/usaspending-bulk-awards"
+    assert cs.MANIFEST.name == "manifest.json" and cs.MANIFEST.exists()
+    assert cs.RESOLVE.startswith("https://huggingface.co/datasets/")

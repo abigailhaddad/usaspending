@@ -132,3 +132,9 @@ def test_reproduce_inlines_filter_binds_safely():
         filter_clauses=["recipient_name IN (?)"], filter_binds=["O'Brien LLC"]))
     assert "'O''Brien LLC'" in out["sql"]
     assert "?" not in out["sql"]                         # every bind inlined
+
+
+def test_inline_value_containing_question_mark_does_not_capture_next_bind():
+    sql = "WHERE a IN (?) AND b IN (?)"
+    out = query._inline(sql, ["WHO? INC", "541511"])
+    assert out == "WHERE a IN ('WHO? INC') AND b IN ('541511')"

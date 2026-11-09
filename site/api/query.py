@@ -135,12 +135,15 @@ def build_detail_sql(req, limit=100000):
 
 def _inline(sql, binds):
     """Replace ? placeholders with safely-quoted literals (for the copy-paste snippet)."""
-    out = sql
-    for b in binds:
-        lit = (str(b) if isinstance(b, (int, float))
-               else "'" + str(b).replace("'", "''") + "'")
-        out = out.replace("?", lit, 1)
-    return out
+    # One pass over the template. Replacing "?" one bind at a time rescans text that an
+    # earlier literal already put in, so a value containing "?" captured the next bind.
+    it = iter(binds)
+
+    def lit(_):
+        b = next(it)
+        return (str(b) if isinstance(b, (int, float))
+                else "'" + str(b).replace("'", "''") + "'")
+    return re.sub(r"\?", lit, sql)
 
 
 # Pinned package versions so the reproduction is deterministic (DuckDB ships Python,

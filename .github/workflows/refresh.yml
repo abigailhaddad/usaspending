@@ -62,6 +62,9 @@ jobs:
           [ -n "${{ github.event.inputs.agency }}" ] && ARG="$ARG --agency ${{ github.event.inputs.agency }}"
           [ -n "${{ github.event.inputs.product }}" ] && ARG="$ARG --product ${{ github.event.inputs.product }}"
           [ -n "${{ github.event.inputs.fiscal_years }}" ] && ARG="$ARG --fiscal-years ${{ github.event.inputs.fiscal_years }}"
+          # pipefail (2026-11-09): without it the step took tee's exit status, so a
+          # backfill exiting 1 on a non-IP error still showed green.
+          set -o pipefail
           python -m usaspending_archive.backfill $ARG | tee run.log
           grep -q CHAIN_NEEDED run.log && echo "chain=true" >> "$GITHUB_OUTPUT" || echo "chain=false" >> "$GITHUB_OUTPUT"
           # How many files this hop actually ingested, for the rebuild gate below.

@@ -91,10 +91,12 @@ def main() -> int:
     done = 0
     blocked = False
     not_found = 0
+    error: Exception | None = None
     # Download + convert a batch locally, then push it as ONE HF commit. HF rate-limits
     # commits (429), so one-commit-per-file does NOT scale — one commit per run does.
-    # Everything is wrapped so an unexpected error still exits cleanly and signals the
-    # chain (work remains) rather than crashing before CHAIN_NEEDED is printed.
+    # Everything is wrapped so an unexpected error still reaches the summary lines
+    # and the manifest stays consistent; _chain_decision then refuses to chain on a
+    # non-IP error (2026-11-09) instead of re-dispatching into the same failure.
     try:
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
@@ -130,6 +132,7 @@ def main() -> int:
                 manifest.save(MANIFEST, m)
                 done = len(staged)
     except Exception as exc:
+        error = exc
         print(f"ERROR (progress through last commit is saved): {exc}")
 
     # NOT_FOUND files (listed but 404) stay in `changed` forever; counting them as
@@ -138,8 +141,30 @@ def main() -> int:
     print(f"\nprocessed {done}, {remaining} changed files remain")
     if not_found:
         print(f"{not_found} listed files returned NOT_FOUND (not counted as remaining)")
-    if blocked or remaining > 0:
+    return _chain_decision(blocked=blocked, error=error, done=done, remaining=remaining)
+
+
+def _chain_decision(*, blocked: bool, error: Exception | None, done: int, remaining: int) -> int:
+    """Print CHAIN_NEEDED only when a fresh run can make progress; return the exit code.
+
+    2026-11-09: this used to chain whenever files remained -- including after an
+    unexpected exception. A deterministic error (a column typed DOUBLE that fails
+    the same file every time) then looped: 93 runs in about an hour, each failing
+    on its first file and dispatching the next, every one reported green. Now:
+      - IP block                             -> chain (fresh runner, fresh IP); exit 0
+      - any other error                      -> no chain; exit 1 so the run fails loudly
+      - progress made, files left (max_files) -> chain; exit 0
+      - no progress, no block, files left    -> no chain; exit 1 (would loop)
+    """
+    if error is not None and not blocked:
+        print(f"::error::backfill stopped on an error, not an IP block -- not chaining: {error}")
+        return 1
+    if blocked or (remaining > 0 and done > 0):
         print("CHAIN_NEEDED")
+        return 0
+    if remaining > 0:
+        print("::error::no file was ingested and the run was not IP-blocked -- not chaining")
+        return 1
     return 0
 
 

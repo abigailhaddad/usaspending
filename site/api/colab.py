@@ -16,6 +16,14 @@ from http.server import BaseHTTPRequestHandler
 DUCKDB_VERSION = "1.5.2"
 
 
+def _py_sql_literal(sql):
+    """SQL as a Python string literal: raw triple-quoted when safe, else repr() so a
+    value containing three double quotes cannot end the string and inject code."""
+    if '"""' in sql or sql.rstrip().endswith('"'):
+        return repr("\n" + sql + "\n")
+    return 'r"""\n' + sql + '\n"""'
+
+
 def make_notebook(sql, title="USAspending — reproducible query"):
     """A runnable notebook built from the exact SQL: install → run (shows the table) →
     a one-cell CSV download. 'Runtime ▸ Run all' reproduces the result and downloads it."""
@@ -30,7 +38,7 @@ def make_notebook(sql, title="USAspending — reproducible query"):
         code([f"!pip install -q duckdb=={DUCKDB_VERSION}\n"]),
         code(["import duckdb, pandas as pd\n", "con = duckdb.connect()\n",
               'con.execute("INSTALL httpfs; LOAD httpfs;")\n',
-              f'df = con.sql(r"""\n{sql}\n""").df()\n',
+              f'df = con.sql({_py_sql_literal(sql)}).df()\n',
               "\n",
               "# readable view: $ on dollar columns, thousands separators (raw df is downloaded below)\n",
               "def _pretty(col):\n",

@@ -148,6 +148,15 @@ def _inline(sql, binds):
 DUCKDB_VERSION = "1.5.2"
 
 
+def py_sql_literal(q):
+    """The query as a Python string literal. Normally a raw triple-quoted block (readable);
+    a filter value containing three double quotes would close it early and turn the rest
+    of the value into code in the snippet the user runs, so fall back to repr()."""
+    if '"""' in q or q.rstrip().endswith('"'):
+        return repr("\n" + q + "\n")
+    return 'r"""\n' + q + '\n"""'
+
+
 def _render_code(sql_hf):
     """One faithful artifact: the EXACT query the table ran, wrapped in a minimal Python
     runner so it both shows the query and executes it. Same SQL + same public serving
@@ -158,7 +167,7 @@ def _render_code(sql_hf):
     python = (
         f"# {header}\n# pip install duckdb=={DUCKDB_VERSION}\nimport duckdb\n"
         "con = duckdb.connect()\ncon.execute(\"INSTALL httpfs; LOAD httpfs;\")\n"
-        f'con.sql(r"""\n{q}\n""").show()\n'
+        f'con.sql({py_sql_literal(q)}).show()\n'
     )
     return {"python": python, "sql": q}
 

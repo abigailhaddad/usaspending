@@ -104,9 +104,14 @@ def list_archive(timeout: int = 60, use_cache: bool = True) -> list[ArchiveFile]
     return out
 
 
-def latest_datestamp(files: list[ArchiveFile]) -> str:
-    """Most recent datestamp present in the archive (the current publish cycle)."""
-    return max(f.datestamp for f in files)
+def latest_datestamp(files: list[ArchiveFile], kind: str | None = None) -> str:
+    """Most recent datestamp present in the archive, optionally for one kind only.
+
+    Pass kind="Full" for "the current Full publish cycle": Deltas can carry a later
+    datestamp than the newest Full files, and matching Full files against an
+    all-kinds max finds none (the same bug fixed in manifest.changed, 2026-10-23).
+    """
+    return max(f.datestamp for f in files if kind is None or f.kind == kind)
 
 
 def summarize(files: list[ArchiveFile]) -> None:

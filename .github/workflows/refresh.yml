@@ -23,6 +23,10 @@ on:
         description: "FYs to process (blank = current + prior FY; 'all' = full re-ingest)"
         required: false
         default: ""
+      stalled_hops:
+        description: "(chain bookkeeping; leave 0) earlier hops IP-blocked before any file landed"
+        required: false
+        default: "0"
   schedule:
     # Daily. The source re-publishes ~monthly, but on no fixed weekday (the last
     # three cycles all landed on the 6th: a Saturday, a Monday, a Thursday), so a
@@ -65,13 +69,19 @@ jobs:
           # pipefail (2026-11-09): without it the step took tee's exit status, so a
           # backfill exiting 1 on a non-IP error still showed green.
           set -o pipefail
-          python -m usaspending_archive.backfill $ARG | tee run.log
+          STALLED="${{ github.event.inputs.stalled_hops }}"; STALLED="${STALLED:-0}"
+          # $ARG is a list of flags: word splitting is intended.
+          # shellcheck disable=SC2086
+          python -m usaspending_archive.backfill $ARG --stalled-hops "$STALLED" | tee run.log
           grep -q CHAIN_NEEDED run.log && echo "chain=true" >> "$GITHUB_OUTPUT" || echo "chain=false" >> "$GITHUB_OUTPUT"
           # How many files this hop actually ingested, for the rebuild gate below.
           # backfill.py's last line is "processed N, M changed files remain"; a
           # missing/garbled line falls back to 0, which the weekly slot covers.
           PROCESSED=$(grep -oE '^processed [0-9]+' run.log | tail -1 | grep -oE '[0-9]+' || true)
           echo "processed=${PROCESSED:-0}" >> "$GITHUB_OUTPUT"
+          # Consecutive hops blocked before any file landed, for backfill's chain cap.
+          if [ "${PROCESSED:-0}" -eq 0 ]; then echo "next_stalled=$((STALLED + 1))" >> "$GITHUB_OUTPUT"
+          else echo "next_stalled=0" >> "$GITHUB_OUTPUT"; fi
 
       - name: Commit manifest
         if: always()
@@ -103,7 +113,8 @@ jobs:
                  -f max_files="${{ github.event.inputs.max_files }}" \
                  -f agency="${{ github.event.inputs.agency }}" \
                  -f product="${{ github.event.inputs.product }}" \
-                 -f fiscal_years="${{ github.event.inputs.fiscal_years }}"; then
+                 -f fiscal_years="${{ github.event.inputs.fiscal_years }}" \
+                 -f stalled_hops="${{ steps.run.outputs.next_stalled }}"; then
               echo "chained next run (attempt $i)"; exit 0
             fi
             echo "dispatch failed, retry $i"; sleep $((RANDOM % 8 + 7))

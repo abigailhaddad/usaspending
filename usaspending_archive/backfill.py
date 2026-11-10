@@ -52,6 +52,10 @@ def main() -> int:
                          "Blank = current + prior fiscal year (the normal refresh "
                          "window). Pass 'all' for a full-catalog re-ingest, e.g. when "
                          "the source restates ETags across every year.")
+    ap.add_argument("--stalled-hops", type=int, default=0,
+                    help="Consecutive earlier hops of this chain that were IP-blocked "
+                         "before ingesting anything (refresh.yml carries it; 0 by hand).")
+    ap.add_argument("--max-stalled-hops", type=int, default=MAX_STALLED_HOPS)
     args = ap.parse_args()
 
     # Blank -> current + prior FY (what a monthly source refresh actually restates);
@@ -141,23 +145,38 @@ def main() -> int:
     print(f"\nprocessed {done}, {remaining} changed files remain")
     if not_found:
         print(f"{not_found} listed files returned NOT_FOUND (not counted as remaining)")
-    return _chain_decision(blocked=blocked, error=error, done=done, remaining=remaining)
+    return _chain_decision(blocked=blocked, error=error, done=done, remaining=remaining,
+                           stalled_hops=args.stalled_hops, max_stalled_hops=args.max_stalled_hops)
 
 
-def _chain_decision(*, blocked: bool, error: Exception | None, done: int, remaining: int) -> int:
+# 2026-11-10 (ported from the unmerged 2026-10-23 PR #2): an IP block chains for a
+# fresh runner, but a block that never lifts -- every hop blocked before its first
+# file -- would chain forever, each hop green. Cap consecutive zero-progress blocked
+# hops. A long --fiscal-years all re-ingest is many hops, but each makes progress.
+MAX_STALLED_HOPS = 3
+
+
+def _chain_decision(*, blocked: bool, error: Exception | None, done: int, remaining: int,
+                    stalled_hops: int = 0, max_stalled_hops: int = MAX_STALLED_HOPS) -> int:
     """Print CHAIN_NEEDED only when a fresh run can make progress; return the exit code.
 
     2026-11-09: this used to chain whenever files remained -- including after an
     unexpected exception. A deterministic error (a column typed DOUBLE that fails
     the same file every time) then looped: 93 runs in about an hour, each failing
     on its first file and dispatching the next, every one reported green. Now:
-      - IP block                             -> chain (fresh runner, fresh IP); exit 0
+      - IP block                             -> chain (fresh runner, fresh IP); exit 0,
+        unless this is the (max_stalled_hops+1)th hop in a row blocked before any
+        file landed -> no chain; exit 1
       - any other error                      -> no chain; exit 1 so the run fails loudly
       - progress made, files left (max_files) -> chain; exit 0
       - no progress, no block, files left    -> no chain; exit 1 (would loop)
     """
     if error is not None and not blocked:
         print(f"::error::backfill stopped on an error, not an IP block -- not chaining: {error}")
+        return 1
+    if blocked and done == 0 and stalled_hops + 1 > max_stalled_hops:
+        print(f"::error::IP-blocked before any file landed on {stalled_hops + 1} hops in a row "
+              f"(cap {max_stalled_hops}) -- not chaining")
         return 1
     if blocked or (remaining > 0 and done > 0):
         print("CHAIN_NEEDED")

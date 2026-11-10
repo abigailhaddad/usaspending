@@ -48,3 +48,14 @@ def test_not_found_does_not_consume_slice(tmp_path, monkeypatch, capsys):
     out = _run(files, dl, tmp_path, monkeypatch, capsys, 1)
     assert "processed 1, 0 changed files remain" in out
     assert "CHAIN_NEEDED" not in out
+
+
+def test_ip_block_chain_is_capped():
+    """2026-11-10: a block that never lifts must not chain forever. Blocked hops that
+    land nothing chain up to MAX_STALLED_HOPS in a row; the next one stops and fails."""
+    d = backfill._chain_decision
+    cap = backfill.MAX_STALLED_HOPS
+    assert d(blocked=True, error=None, done=0, remaining=5, stalled_hops=cap - 1) == 0  # last allowed
+    assert d(blocked=True, error=None, done=0, remaining=5, stalled_hops=cap) == 1      # one too many
+    # progress resets nothing here: a blocked hop that landed files always chains
+    assert d(blocked=True, error=None, done=3, remaining=5, stalled_hops=cap + 5) == 0

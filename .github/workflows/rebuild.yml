@@ -20,6 +20,9 @@ on:
       years:
         description: "recent (newest 2 FYs) | all | comma-separated FYs"
         default: "recent"
+      allow_shrink:
+        description: "Replace serve files even if rows drop >5%, columns vanish, or the action_date range shrinks (intentional changes only)"
+        default: "false"
   # NOT triggered by workflow_run on the ingestion. refresh.yml already dispatches this
   # workflow itself when the drain completes, and it passes the year list it wants
   # (current + prior FY + a rotating audit year). A workflow_run trigger fired a SECOND,
@@ -71,6 +74,10 @@ jobs:
       - name: Compact ${{ matrix.product }} ${{ matrix.year }} → serve layer (HF)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          # compact_serve refuses (exits non-zero) to replace a serve file with one that
+          # lost >5% of rows, any column, or part of its action_date range; this is the
+          # deliberate override. refresh.yml's dispatch doesn't pass it, so it's false.
+          SERVE_ALLOW_SHRINK: ${{ github.event.inputs.allow_shrink || 'false' }}
         run: python -m usaspending_archive.compact_serve --product ${{ matrix.product }} --years ${{ matrix.year }}
 
   sync_r2:

@@ -21,11 +21,12 @@ ASSISTANCE_COLS = 112
 FY_RANGE = "FY2007–present"
 
 REF_TABLES = {
-    "data_dictionary": "Rosetta crosswalk — every column's definition, domain values, and source file",
-    "toptier_agencies": "Agency code ↔ name crosswalk",
-    "def_codes": "Disaster Emergency Fund Codes (COVID-19 = L–U, IIJA = Z & 1)",
+    "data_dictionary": "Rosetta crosswalk — column definitions, domain values, and source file",
+    "toptier_agencies": "Agency code ↔ name crosswalk (toptier agencies only)",
+    "agency_codes": "CGAC agency code ↔ name for every agency code in the archive",
+    "def_codes": "Disaster Emergency Fund Codes; the `disaster` column tags COVID-19 and IIJA codes",
     "glossary": "Plain-language term definitions",
-    "assistance_listing": "CFDA / assistance program catalog",
+    "assistance_listing": "Assistance Listing (CFDA) 2-digit agency prefixes, with the number of programs under each (no program titles)",
 }
 
 
@@ -34,9 +35,28 @@ def _rows(name: str) -> int | None:
     return pq.read_metadata(p).num_rows if p.exists() else None
 
 
+def _disaster_codes() -> str | None:
+    """'COVID-19 = L, M, ...; IIJA = 1, Z' read from def_codes.parquet's `disaster`
+    column, so the card can't drift from the table (it once said 'L–U', which
+    included non-COVID codes Q–T and left out V)."""
+    p = REF / "def_codes.parquet"
+    if not p.exists():
+        return None
+    t = pq.read_table(p, columns=["code", "disaster"]).to_pylist()
+    labels = {"covid_19": "COVID-19", "infrastructure": "IIJA"}
+    parts = []
+    for key, label in labels.items():
+        codes = sorted(r["code"] for r in t if r["disaster"] == key)
+        if codes:
+            parts.append(f"{label} = {', '.join(codes)}")
+    return "; ".join(parts) or None
+
+
 def generate() -> str:
     ref_lines = []
     for name, desc in REF_TABLES.items():
+        if name == "def_codes" and (dc := _disaster_codes()):
+            desc = f"Disaster Emergency Fund Codes ({dc}, per the `disaster` column)"
         n = _rows(name)
         cnt = f"{n:,} rows" if n is not None else "—"
         ref_lines.append(f"| `reference/{name}.parquet` | {cnt} | {desc} |")
@@ -64,7 +84,7 @@ Clean, partitioned, query-ready Parquet mirror of the public
 [USAspending Award Data Archive](https://files.usaspending.gov/award_data_archive/)
 (prime contract and financial-assistance transactions, {FY_RANGE}, all agencies).
 
-The source publishes ~4,600 per-agency ZIP/CSV files (~830 GB uncompressed). This
+The source publishes ~4,700 ZIP/CSV files (one per product × fiscal year × agency, plus an all-agency file per product × year) (~830 GB uncompressed). This
 dataset normalizes them to typed, zstd-compressed Parquet (~8× smaller) with
 amount columns as `double` and date columns as `date`, partitioned for fast
 predicate-pushdown querying.
@@ -103,7 +123,10 @@ serve/{{contracts,assistance}}/YYYY.parquet               # one compacted file p
 |---|---|---|
 {ref_block}
 
-The data dictionary documents every column in both products.
+The data dictionary covers most columns in both products. A few archive columns
+have no entry in it: `recipient_duns`, `recipient_parent_duns`, `initial_report_date`,
+the four `prime_award_transaction_*_cd_original` / `_cd_current` congressional-district
+columns, and (assistance only) `generated_pragmatic_obligations`.
 
 ## Quick start (DuckDB)
 
@@ -163,8 +186,11 @@ file count. Use the `serve/` layer above for remote queries instead.
 - **Source:** USAspending.gov Award Data Archive (U.S. Government public-domain data).
 - **Coverage:** {FY_RANGE}, prime awards only. Subawards and account File A/B/C are not
   in the source archive (they come from USAspending's Custom Bulk Download API).
-- **Updates:** refreshed when the source re-publishes; only changed (agency, FY) slices
-  are re-processed (tracked by file ETag). Latest snapshot only.
+- **Updates:** a daily job checks the source archive, which re-publishes about monthly.
+  It re-processes changed (agency, FY) slices, tracked by file ETag, but only for the
+  current and prior fiscal year. Older fiscal years are re-ingested only by a manual
+  full run, so they can come from an earlier monthly cycle than the recent years.
+  One copy of each slice is kept; there is no version history.
 - **Not** the full USAspending Postgres database dump.
 """
 
